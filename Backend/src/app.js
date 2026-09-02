@@ -16,9 +16,23 @@ app.use(cookieParser())
 
 
 //routes import
+import authRouter from "./routes/staff.routes.js";
+import farmerRouter from "./routes/farmer.routes.js";
+import slotRouter from "./routes/slot.routes.js";
+import bookingRouter from "./routes/booking.routes.js";
+import procurementRouter from "./routes/procurement.routes.js";
+import paymentRouter from "./routes/payment.routes.js";
+import { errorHandler } from "./middlewares/error.middleware.js";
 
 //routes declaration
+app.use("/api/v1/auth", authRouter);
+app.use("/api/v1/farmers", farmerRouter);
+app.use("/api/v1/slots", slotRouter);
+app.use("/api/v1/bookings", bookingRouter);
+app.use("/api/v1/procurements", procurementRouter);
+app.use("/api/v1/payments", paymentRouter);
 
-// http://localhost:8000/api/v1/users/register
+
+app.use(errorHandler);
 
 export { app }
