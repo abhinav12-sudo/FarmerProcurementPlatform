@@ -5,7 +5,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Slot } from "../models/slot.model.js";
 import { Booking } from "../models/booking.model.js";
 import { notify } from "../utils/notify.js";
-
+import { updateQueueNotifications } from "../utils/queueNotifier.js";
 /**
  * The capacity check and the seat reservation happen as a single atomic
  * findOneAndUpdate: "find this slot WHERE bookedCount is still less than
@@ -77,6 +77,8 @@ const cancelBooking = asyncHandler(async (req, res) => {
         throw new ApiError(409, "Booking not found or already finalized");
     }
     await Slot.updateOne({ _id: booking.slotId }, { $inc: { bookedCount: -1 } });
+    await Slot.updateOne({ _id: booking.slotId }, { $inc: { bookedCount: -1 } });
+    await updateQueueNotifications(booking.centerId); // ← add this line
     return res.status(200).json(new ApiResponse(200, booking, "Booking cancelled"));
 });
 

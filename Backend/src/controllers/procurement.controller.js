@@ -6,6 +6,7 @@ import { Booking } from "../models/booking.model.js";
 import { Procurement } from "../models/procurement.model.js";
 import { Payment } from "../models/payment.model.js";
 import { notify } from "../utils/notify.js";
+import { updateQueueNotifications } from "../utils/queueNotifier.js";
 
 /**
  * Touches three documents (booking, procurement, payment) that must all
@@ -64,6 +65,7 @@ const recordProcurement = asyncHandler(async (req, res) => {
         "procurement_completed",
         `Procurement recorded. Total amount due: Rs ${result.totalAmount.toFixed(2)}. Payment is now pending.`
     );
+    await updateQueueNotifications(result.booking.centerId);
 
     return res.status(201).json(new ApiResponse(201, result, "Procurement recorded"));
 });

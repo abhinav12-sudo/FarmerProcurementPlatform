@@ -25,6 +25,10 @@ const bookingSchema = new Schema({
     enum: ['booked', 'checked_in', 'completed', 'no_show', 'cancelled'],
     default: 'booked',
   },
+  fivePeopleAheadNotified: {
+    type: Boolean,
+    default: false,
+  },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 bookingSchema.index({ centerId: 1, status: 1, createdAt: 1 });
