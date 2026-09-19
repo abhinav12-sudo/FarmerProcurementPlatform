@@ -8,12 +8,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path = "/farmer" element = {<FarmerLogin/>}/>
-        <Route path = "/staff" element = {<StaffLogin/>}/>
-
-
-
-
+        <Route path="/farmer/login" element={<FarmerLogin />} />
+        <Route path="/staff" element={<StaffLogin />} />
+        <Route path="/staff/login" element={<StaffLogin />} />
       </Routes>
     </BrowserRouter>
   )
