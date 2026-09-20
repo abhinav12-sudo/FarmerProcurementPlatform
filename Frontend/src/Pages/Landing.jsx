@@ -14,16 +14,20 @@ export default function Landing() {
         navigate('/farmer/login')
       }
     } else {
-      navigate('/staff')
+      if (localStorage.getItem('staff')) {
+        navigate('/staff/home')
+      } else {
+        navigate('/staff/login')
+      }
     }
   }
+
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-emerald-50 to-emerald-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8">
       {/* Top Bar / Government Header */}
       <div className="w-full max-w-4xl text-center pt-4">
         <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100/80 border border-emerald-200 text-emerald-900 rounded-full text-xs font-semibold tracking-wide uppercase shadow-sm">
-          <span>🌾</span>
           <span>Ministry of Consumer Affairs, Food & Public Distribution</span>
         </div>
         <h1 className="text-2xl sm:text-4xl font-extrabold text-gray-900 mt-3 tracking-tight">

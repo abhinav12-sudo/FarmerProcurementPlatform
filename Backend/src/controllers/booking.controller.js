@@ -77,8 +77,7 @@ const cancelBooking = asyncHandler(async (req, res) => {
         throw new ApiError(409, "Booking not found or already finalized");
     }
     await Slot.updateOne({ _id: booking.slotId }, { $inc: { bookedCount: -1 } });
-    await Slot.updateOne({ _id: booking.slotId }, { $inc: { bookedCount: -1 } });
-    await updateQueueNotifications(booking.centerId); // ← add this line
+    await updateQueueNotifications(booking.centerId);
     return res.status(200).json(new ApiResponse(200, booking, "Booking cancelled"));
 });
 
@@ -102,4 +101,50 @@ const getQueue = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, { queue, currentlyWaiting: queue.length }, "Live queue fetched"));
 });
 
-export { createBooking, checkInBooking, cancelBooking, getQueue };
+// Staff / Admin — fetch all appointments/bookings for a center with full farmer and slot info
+const getCenterBookings = asyncHandler(async (req, res) => {
+    const { center_id } = req.params;
+    const { status, date, search } = req.query;
+
+    const filter = { centerId: center_id };
+    if (status && status !== "all") {
+        filter.status = status;
+    }
+
+    const bookings = await Booking.find(filter)
+        .populate("farmerId", "name phone aadhaarNumber landRecordNumber bankAccount")
+        .populate("slotId", "cropType startTime capacity")
+        .sort({ createdAt: -1 });
+
+    let result = bookings;
+
+    // Filter by search query (token #, farmer name, phone)
+    if (search && search.trim()) {
+        const term = search.trim().toLowerCase();
+        result = result.filter((b) => {
+            const tokenMatch = b.tokenNumber?.toLowerCase().includes(term);
+            const nameMatch = b.farmerId?.name?.toLowerCase().includes(term);
+            const phoneMatch = b.farmerId?.phone?.includes(term);
+            return tokenMatch || nameMatch || phoneMatch;
+        });
+    }
+
+    // Filter by date if specified
+    if (date) {
+        const start = new Date(date);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(date);
+        end.setHours(23, 59, 59, 999);
+
+        result = result.filter((b) => {
+            if (!b.slotId?.startTime) return true;
+            const slotTime = new Date(b.slotId.startTime);
+            return slotTime >= start && slotTime <= end;
+        });
+    }
+
+    return res.status(200).json(new ApiResponse(200, result, "Center bookings fetched"));
+});
+
+export { createBooking, checkInBooking, cancelBooking, getQueue, getCenterBookings };
+

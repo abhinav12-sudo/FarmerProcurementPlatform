@@ -61,7 +61,7 @@ const requestOtp = asyncHandler(async (req, res) => {
         `Your login OTP is ${otp}. It is valid for ${OTP_EXPIRY_MINUTES} minutes. Do not share this with anyone.`
     );
 
-    return res.status(200).json(new ApiResponse(200, { phone }, "OTP sent successfully"));
+    return res.status(200).json(new ApiResponse(200, { phone, previewOtp: otp }, "OTP sent successfully"));
 });
 
 // Step 2 of login — verify the code, issue tokens
@@ -101,11 +101,22 @@ const verifyOtp = asyncHandler(async (req, res) => {
         .json(
             new ApiResponse(
                 200,
-                { farmer: { _id: farmer._id, name: farmer.name, phone: farmer.phone }, accessToken },
+                {
+                    farmer: {
+                        _id: farmer._id,
+                        name: farmer.name,
+                        phone: farmer.phone,
+                        village: farmer.village,
+                        landRecordNumber: farmer.landRecordNumber,
+                        bankAccount: farmer.bankAccount,
+                    },
+                    accessToken,
+                },
                 "Logged in successfully"
             )
         );
 });
+
 
 const refreshFarmerToken = asyncHandler(async (req, res) => {
     const incomingRefreshToken = req.cookies?.farmerRefreshToken || req.body?.refreshToken;

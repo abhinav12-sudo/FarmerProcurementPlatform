@@ -78,4 +78,40 @@ const getProcurement = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, procurement, "Procurement fetched"));
 });
 
-export { recordProcurement, getProcurement };
+// Staff / Admin — fetch all procurements recorded at a center with payment & farmer details
+const getCenterProcurements = asyncHandler(async (req, res) => {
+    const { center_id } = req.params;
+
+    const bookings = await Booking.find({ centerId: center_id })
+        .populate("farmerId", "name phone landRecordNumber bankAccount aadhaarNumber")
+        .populate("slotId", "cropType startTime");
+
+    const bookingMap = new Map();
+    bookings.forEach((b) => bookingMap.set(b._id.toString(), b));
+
+    const bookingIds = bookings.map((b) => b._id);
+
+    const procurements = await Procurement.find({ bookingId: { $in: bookingIds } })
+        .sort({ recordedAt: -1 });
+
+    const procurementIds = procurements.map((p) => p._id);
+    const payments = await Payment.find({ procurementId: { $in: procurementIds } });
+
+    const paymentMap = new Map();
+    payments.forEach((pay) => paymentMap.set(pay.procurementId.toString(), pay));
+
+    const result = procurements.map((proc) => {
+        const booking = bookingMap.get(proc.bookingId.toString()) || null;
+        const payment = paymentMap.get(proc._id.toString()) || null;
+        return {
+            ...proc.toObject(),
+            booking,
+            payment,
+        };
+    });
+
+    return res.status(200).json(new ApiResponse(200, result, "Center procurements fetched"));
+});
+
+export { recordProcurement, getProcurement, getCenterProcurements };
+
