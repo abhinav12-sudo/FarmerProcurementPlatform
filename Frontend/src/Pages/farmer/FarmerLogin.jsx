@@ -43,16 +43,16 @@ export default function FarmerLogin() {
       const response = await api.post('/farmers/register', formData)
       const farmer = response.data?.data
 
-      
+
       localStorage.setItem('farmer', JSON.stringify(farmer))
       setSuccess('Farmer registered successfully! Redirecting...')
 
       setTimeout(() => {
         navigate('/farmer/home')
       }, 1200)
-    }catch (err) {
+    } catch (err) {
       const errorMsg = err.response?.data?.message || 'Something went wrong. Please check backend connection.'
-      
+
       // If farmer is already registered with this phone number
       if (err.response?.status === 409) {
         setError('This phone number is already registered. If this is you, you can continue directly.')
@@ -65,7 +65,7 @@ export default function FarmerLogin() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50 to-emerald-100 flex flex-col justify-center items-center p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-emerald-50 to-emerald-100 flex flex-col justify-center items-center p-4 sm:p-6">
       {/* Header & Back button */}
       <div className="w-full max-w-md mb-4 flex items-center justify-between">
         <button
