@@ -29,8 +29,12 @@ const bookingSchema = new Schema({
     type: Boolean,
     default: false,
   },
+  checkedInAt: {
+    type: Date,
+  },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
+bookingSchema.index({ centerId: 1, status: 1, checkedInAt: 1 });
 bookingSchema.index({ centerId: 1, status: 1, createdAt: 1 });
 bookingSchema.index({ farmerId: 1 });
 

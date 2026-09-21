@@ -379,8 +379,14 @@ export default function StaffHome() {
     return tokenMatch || nameMatch || phoneMatch
   })
 
-  // Checked-in farmers ready for weighing
-  const checkedInBookings = bookings.filter((b) => b.status === 'checked_in')
+  // Checked-in farmers ready for weighing (ordered strictly by gate arrival time)
+  const checkedInBookings = bookings
+    .filter((b) => b.status === 'checked_in')
+    .sort((a, b) => {
+      const timeA = a.checkedInAt ? new Date(a.checkedInAt).getTime() : new Date(a.createdAt).getTime()
+      const timeB = b.checkedInAt ? new Date(b.checkedInAt).getTime() : new Date(b.createdAt).getTime()
+      return timeA - timeB
+    })
 
   // Metric Computations
   const totalBookedToday = bookings.filter((b) => b.status === 'booked').length

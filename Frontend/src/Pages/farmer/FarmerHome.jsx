@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import api from '../../api/client.js'
 import Navbar from '../../Components/Navbar.jsx'
 import SlotBooking from '../../Components/SlotBooking.jsx'
 import FarmerHistory from '../../Components/FarmerHistory.jsx'
+import LiveQueueTracker from '../../Components/LiveQueueTracker.jsx'
 import { Calendar, Ticket, Landmark, FileText, CheckCircle2, MessageSquare, X } from 'lucide-react'
 
 export default function FarmerHome() {
   const navigate = useNavigate()
   const [farmer, setFarmer] = useState(null)
+  const [activeBookings, setActiveBookings] = useState([])
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [smsNotification, setSmsNotification] = useState(null)
 
@@ -26,6 +29,32 @@ export default function FarmerHome() {
     }
   }, [navigate])
 
+  // Fetch all active bookings for Live Queue Tracker
+  useEffect(() => {
+    if (!farmer?._id) return
+
+    api.get(`/farmers/${farmer._id}/history`)
+      .then((res) => {
+        const historyList = res.data?.data || []
+        // Include booked, checked_in, and recent completed bookings (within 48h) for live tracking & payout monitoring
+        const activeList = historyList.filter((b) => {
+          if (b.status === 'booked' || b.status === 'checked_in') return true
+          if (b.status === 'completed') {
+            const timestamp = b.procuredAt || b.createdAt
+            if (!timestamp) return true
+            const diffHours = (Date.now() - new Date(timestamp).getTime()) / (1000 * 60 * 60)
+            return diffHours <= 48
+          }
+          return false
+        })
+        setActiveBookings(activeList)
+      })
+      .catch(() => {
+        // Non-blocking
+      })
+  }, [farmer?._id, refreshTrigger])
+
+
   const handleBookingSuccess = (booking) => {
     // Trigger history refresh
     setRefreshTrigger((prev) => prev + 1)
@@ -41,6 +70,7 @@ export default function FarmerHome() {
       setSmsNotification(null)
     }, 8000)
   }
+
 
   if (!farmer) {
     return null
@@ -119,10 +149,23 @@ export default function FarmerHome() {
 
         {/* Main Content Sections */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-8">
+          {/* Live Queue Radar (Appears when farmer has active bookings) */}
+          {activeBookings.length > 0 && (
+            <section className="animate-in fade-in slide-in-from-top-3">
+              <LiveQueueTracker
+                activeBookings={activeBookings}
+                farmer={farmer}
+                onRefresh={() => setRefreshTrigger((prev) => prev + 1)}
+              />
+            </section>
+          )}
+
+
           {/* Section 1: Book Mandi Slot */}
           <section>
             <SlotBooking farmer={farmer} onBookingSuccess={handleBookingSuccess} />
           </section>
+
 
           {/* Section 2: My Tokens & Mandi Passbook */}
           <section>

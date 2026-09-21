@@ -174,14 +174,19 @@ const getFarmerHistory = asyncHandler(async (req, res) => {
             $project: {
                 tokenNumber: 1,
                 status: 1,
+                createdAt: 1,
                 cropType: "$slot.cropType",
                 startTime: "$slot.startTime",
                 centerName: "$center.name",
+                centerId: "$center._id",
                 amount: "$payment.amount",
                 paymentStatus: "$payment.status",
+                items: "$procurement.items",
+                procuredAt: "$procurement.recordedAt",
             },
         },
     ]);
+
 
     return res.status(200).json(new ApiResponse(200, history, "Farmer history fetched"));
 });

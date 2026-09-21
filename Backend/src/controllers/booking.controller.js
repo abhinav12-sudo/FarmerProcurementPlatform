@@ -57,7 +57,7 @@ const createBooking = asyncHandler(async (req, res) => {
 const checkInBooking = asyncHandler(async (req, res) => {
     const booking = await Booking.findOneAndUpdate(
         { _id: req.params.id, status: "booked" },
-        { status: "checked_in" },
+        { status: "checked_in", checkedInAt: new Date() },
         { new: true }
     );
     if (!booking) {
@@ -84,21 +84,71 @@ const cancelBooking = asyncHandler(async (req, res) => {
 // Live queue for a center — poll this from the frontend, or upgrade to a
 // change stream + Socket.io later for real push updates
 const getQueue = asyncHandler(async (req, res) => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
+    const centerObjectId = new mongoose.Types.ObjectId(req.params.center_id);
 
-    const queue = await Booking.aggregate([
-        { $match: { centerId: new mongoose.Types.ObjectId(req.params.center_id), status: "checked_in" } },
+    // 1. Physically checked-in tractors inside the Mandi yard waiting for scale (sorted by check-in arrival time)
+    const checkedInQueue = await Booking.aggregate([
+        { $match: { centerId: centerObjectId, status: "checked_in" } },
         { $lookup: { from: "slots", localField: "slotId", foreignField: "_id", as: "slot" } },
-        { $unwind: "$slot" },
-        { $match: { "slot.startTime": { $gte: startOfDay, $lt: endOfDay } } },
-        { $sort: { createdAt: 1 } },
-        { $project: { tokenNumber: 1, status: 1, cropType: "$slot.cropType", startTime: "$slot.startTime" } },
+        { $unwind: { path: "$slot", preserveNullAndEmptyArrays: true } },
+        { $sort: { checkedInAt: 1, createdAt: 1 } },
+        {
+            $project: {
+                tokenNumber: 1,
+                status: 1,
+                cropType: { $ifNull: ["$slot.cropType", "Produce"] },
+                startTime: "$slot.startTime",
+                checkedInAt: 1,
+                createdAt: 1,
+            },
+        },
     ]);
 
-    return res.status(200).json(new ApiResponse(200, { queue, currentlyWaiting: queue.length }, "Live queue fetched"));
+    // 2. Advance booked tokens for this center awaiting arrival
+    const bookedQueue = await Booking.aggregate([
+        { $match: { centerId: centerObjectId, status: "booked" } },
+        { $lookup: { from: "slots", localField: "slotId", foreignField: "_id", as: "slot" } },
+        { $unwind: { path: "$slot", preserveNullAndEmptyArrays: true } },
+        { $sort: { createdAt: 1 } },
+        {
+            $project: {
+                tokenNumber: 1,
+                status: 1,
+                cropType: { $ifNull: ["$slot.cropType", "Produce"] },
+                startTime: "$slot.startTime",
+                createdAt: 1,
+            },
+        },
+    ]);
+
+    // 3. Most recently completed booking (to know last processed token if scale is currently between turns)
+    const latestCompleted = await Booking.findOne({ centerId: centerObjectId, status: "completed" })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .select("tokenNumber cropType updatedAt");
+
+    const servingToken = checkedInQueue.length > 0
+        ? checkedInQueue[0].tokenNumber
+        : (latestCompleted ? latestCompleted.tokenNumber : null);
+
+    const avgProcessingMinutes = 12;
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                queue: checkedInQueue, // for backward compatibility
+                checkedInQueue,
+                bookedQueue,
+                servingToken,
+                lastCompletedToken: latestCompleted?.tokenNumber || null,
+                currentlyWaiting: checkedInQueue.length,
+                totalBookedWaiting: bookedQueue.length,
+                totalActiveToday: checkedInQueue.length + bookedQueue.length,
+                avgProcessingMinutes,
+            },
+            "Live queue fetched"
+        )
+    );
 });
 
 // Staff / Admin — fetch all appointments/bookings for a center with full farmer and slot info
