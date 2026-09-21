@@ -29,6 +29,54 @@ const createBooking = asyncHandler(async (req, res) => {
         throw new ApiError(409, "Slot is full or not found, please choose another slot");
     }
 
+    // Capacity guard for today's intake
+    const now = new Date();
+    const slotDate = new Date(slot.startTime);
+    const isToday = slotDate.toDateString() === now.toDateString();
+
+    if (isToday) {
+        // If current time is 5:00 PM or later, reject today's bookings immediately
+        if (now.getHours() >= 17) {
+            await Slot.updateOne({ _id: slot_id }, { $inc: { bookedCount: -1 } });
+            throw new ApiError(409, "Mandi gate check-in has closed for today (past 5:00 PM). Please select tomorrow's date.");
+        }
+
+        // Check active queue count for today at this center
+        const activeCount = await Booking.countDocuments({
+            centerId: slot.centerId,
+            status: { $in: ["booked", "checked_in"] },
+        });
+
+        // Calculate projected scale turn time (12 min/tractor + 1 hr lunch pause 13:00 - 14:00)
+        const avgMinutes = 12;
+        const nineAm = new Date(now);
+        nineAm.setHours(9, 0, 0, 0);
+        const baseTime = now > nineAm ? now : nineAm;
+
+        let projectedMs = baseTime.getTime() + activeCount * avgMinutes * 60 * 1000;
+        const onePm = new Date(now);
+        onePm.setHours(13, 0, 0, 0);
+        const twoPm = new Date(now);
+        twoPm.setHours(14, 0, 0, 0);
+
+        if (baseTime < onePm && projectedMs >= onePm.getTime()) {
+            projectedMs += 60 * 60 * 1000; // Add 60 min lunch shift
+        } else if (baseTime >= onePm && baseTime < twoPm) {
+            projectedMs = twoPm.getTime() + activeCount * avgMinutes * 60 * 1000;
+        }
+
+        const fivePm = new Date(now);
+        fivePm.setHours(17, 0, 0, 0);
+
+        if (projectedMs > fivePm.getTime()) {
+            await Slot.updateOne({ _id: slot_id }, { $inc: { bookedCount: -1 } });
+            throw new ApiError(
+                409,
+                "Today's Mandi intake is at full capacity (queue extends past 5:00 PM gate closing). Please book a slot for tomorrow."
+            );
+        }
+    }
+
     try {
         const tokenNumber = `${slot.cropType.slice(0, 3).toUpperCase()}-${slot.bookedCount}`;
         const booking = await Booking.create({
@@ -81,12 +129,62 @@ const cancelBooking = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, booking, "Booking cancelled"));
 });
 
+// Helper to expire any 'booked' bookings whose scheduled gate time has passed (past dates or today after 5:00 PM)
+const expireMissedBookings = async (centerId) => {
+    try {
+        const now = new Date();
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const currentHour = now.getHours();
+        const isPast5pmToday = currentHour >= 17;
+
+        // Expire un-checked-in bookings from past days, OR today's bookings if current time >= 17:00
+        const expireFilter = {
+            centerId,
+            status: "booked",
+            $or: [
+                { createdAt: { $lt: startOfToday } },
+                ...(isPast5pmToday ? [{ createdAt: { $gte: startOfToday } }] : []),
+            ],
+        };
+
+        const expiredBookings = await Booking.find(expireFilter);
+        if (expiredBookings.length > 0) {
+            const expiredIds = expiredBookings.map((b) => b._id);
+            await Booking.updateMany(
+                { _id: { $in: expiredIds } },
+                { status: "cancelled" }
+            );
+
+            // Decrement slot bookedCount for expired bookings
+            for (const b of expiredBookings) {
+                if (b.slotId) {
+                    await Slot.updateOne({ _id: b.slotId }, { $inc: { bookedCount: -1 } });
+                }
+            }
+
+            await updateQueueNotifications(centerId);
+        }
+    } catch (err) {
+        console.error("Error expiring missed bookings:", err);
+    }
+};
+
 // Live queue for a center — poll this from the frontend, or upgrade to a
 // change stream + Socket.io later for real push updates
 const getQueue = asyncHandler(async (req, res) => {
     const centerObjectId = new mongoose.Types.ObjectId(req.params.center_id);
 
-    // 1. Physically checked-in tractors inside the Mandi yard waiting for scale (sorted by check-in arrival time)
+    // 1. Auto-expire un-checked-in bookings if past 5:00 PM or from past dates
+    await expireMissedBookings(centerObjectId);
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const isLunchBreak = currentHour === 13; // 1:00 PM - 2:00 PM
+    const isGateClosed = currentHour >= 17;  // 5:00 PM onwards
+
+    // 2. Physically checked-in tractors inside the Mandi yard waiting for scale (sorted by check-in arrival time)
     const checkedInQueue = await Booking.aggregate([
         { $match: { centerId: centerObjectId, status: "checked_in" } },
         { $lookup: { from: "slots", localField: "slotId", foreignField: "_id", as: "slot" } },
@@ -104,7 +202,7 @@ const getQueue = asyncHandler(async (req, res) => {
         },
     ]);
 
-    // 2. Advance booked tokens for this center awaiting arrival
+    // 3. Advance booked tokens for this center awaiting arrival
     const bookedQueue = await Booking.aggregate([
         { $match: { centerId: centerObjectId, status: "booked" } },
         { $lookup: { from: "slots", localField: "slotId", foreignField: "_id", as: "slot" } },
@@ -121,7 +219,7 @@ const getQueue = asyncHandler(async (req, res) => {
         },
     ]);
 
-    // 3. Most recently completed booking (to know last processed token if scale is currently between turns)
+    // 4. Most recently completed booking (to know last processed token if scale is currently between turns)
     const latestCompleted = await Booking.findOne({ centerId: centerObjectId, status: "completed" })
         .sort({ updatedAt: -1, createdAt: -1 })
         .select("tokenNumber cropType updatedAt");
@@ -145,6 +243,8 @@ const getQueue = asyncHandler(async (req, res) => {
                 totalBookedWaiting: bookedQueue.length,
                 totalActiveToday: checkedInQueue.length + bookedQueue.length,
                 avgProcessingMinutes,
+                isLunchBreak,
+                isGateClosed,
             },
             "Live queue fetched"
         )

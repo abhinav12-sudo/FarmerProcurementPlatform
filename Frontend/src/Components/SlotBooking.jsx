@@ -240,6 +240,32 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
             </span>
           </div>
 
+          {/* Today Capacity Exceeded Warning */}
+          {slots.length > 0 && slots.some((s) => s.isTodayCapacityFull) && (
+            <div className="mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-sm">⛔ Today's Mandi Intake at Full Capacity</h4>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    Queue for today already extends past the 5:00 PM gate closing. Any further bookings for today cannot be accommodated.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const tomorrow = new Date()
+                  tomorrow.setDate(tomorrow.getDate() + 1)
+                  setSelectedDate(tomorrow.toISOString().split('T')[0])
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-xs"
+              >
+                Switch to Tomorrow (कल के लिए बुक करें)
+              </button>
+            </div>
+          )}
+
           {loadingSlots ? (
             <div className="py-12 flex flex-col items-center justify-center text-gray-500">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mb-2" />
@@ -262,7 +288,8 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {slots.map((slot) => {
-                const isFull = slot.seatsLeft <= 0
+                const isCapacityExceeded = slot.isTodayCapacityFull
+                const isFull = slot.seatsLeft <= 0 || isCapacityExceeded
                 const isBookingThis = bookingSlotId === slot._id
 
                 return (
@@ -282,14 +309,20 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
                         </span>
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            isFull
+                            isCapacityExceeded
+                              ? 'bg-amber-100 text-amber-800'
+                              : isFull
                               ? 'bg-gray-200 text-gray-600'
                               : slot.seatsLeft <= 3
                               ? 'bg-amber-100 text-amber-800'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
-                          {isFull ? 'Full' : `${slot.seatsLeft} seats left`}
+                          {isCapacityExceeded
+                            ? 'Intake Closed (5 PM Cutoff)'
+                            : isFull
+                            ? 'Full'
+                            : `${slot.seatsLeft} seats left`}
                         </span>
                       </div>
 
@@ -314,6 +347,8 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           <span>Reserving Seat...</span>
                         </>
+                      ) : isCapacityExceeded ? (
+                        <span>Intake Full (Cutoff 5:00 PM)</span>
                       ) : isFull ? (
                         <span>Slot Full</span>
                       ) : (

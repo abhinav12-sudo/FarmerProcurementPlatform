@@ -859,40 +859,114 @@ export default function StaffHome() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                  {checkedInBookings.map((b) => (
-                    <div
-                      key={b._id}
-                      className="bg-slate-50 p-5 rounded-2xl border border-slate-200 hover:border-slate-400 transition flex flex-col justify-between gap-4 shadow-xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-1 bg-slate-900 text-white rounded-lg text-xs font-black">
-                              {b.tokenNumber}
-                            </span>
-                            <h4 className="font-bold text-slate-900 text-base">
-                              {b.farmerId?.name || 'Farmer'}
-                            </h4>
-                          </div>
-                          <p className="text-xs text-slate-600 mt-1">
-                            Mobile: {b.farmerId?.phone} • Land: {b.farmerId?.landRecordNumber || 'Verified'}
-                          </p>
-                          <p className="text-xs text-slate-800 font-semibold mt-1">
-                            Scheduled Crop: {b.slotId?.cropType || 'Wheat'}
-                          </p>
-                        </div>
-                      </div>
+                <div className="space-y-4 mt-6">
+                  {checkedInBookings.map((b, idx) => {
+                    const isFirst = idx === 0
+                    const checkInTimeFormatted = b.checkedInAt
+                      ? new Date(b.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                      : (b.createdAt ? new Date(b.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Just now')
 
-                      <button
-                        onClick={() => openWeighModal(b)}
-                        className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-medium py-2.5 px-4 rounded-xl text-xs sm:text-sm shadow-sm transition cursor-pointer"
+                    if (isFirst) {
+                      return (
+                        <div
+                          key={b._id}
+                          className="bg-gradient-to-r from-emerald-50 via-white to-teal-50/70 border-2 border-emerald-500 rounded-3xl p-6 sm:p-7 shadow-md ring-4 ring-emerald-500/10 transition flex flex-col justify-between gap-5 relative overflow-hidden"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-100 pb-4">
+                            <div className="flex items-center gap-2">
+                              <span className="px-3 py-1 bg-emerald-600 text-white rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+                                <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
+                                Scale #1 Active Turn • First in Line
+                              </span>
+                              <span className="text-xs font-bold text-emerald-900 bg-emerald-100 px-3 py-1 rounded-full border border-emerald-200">
+                                Turn #1
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono font-medium text-emerald-800 bg-white/90 px-3 py-1 rounded-full border border-emerald-200 self-start sm:self-auto">
+                              Gate Arrival: <strong>{checkInTimeFormatted}</strong>
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+                            <div className="flex items-start gap-4">
+                              <div className="px-4 py-3 bg-slate-950 text-white rounded-2xl text-xl sm:text-2xl font-black font-mono shadow-sm flex items-center justify-center shrink-0 border border-slate-700">
+                                {b.tokenNumber}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-black text-slate-900 text-xl sm:text-2xl">
+                                    {b.farmerId?.name || 'Farmer'}
+                                  </h4>
+                                  <span className="text-xs font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg border border-emerald-200">
+                                    {b.slotId?.cropType || 'Produce'}
+                                  </span>
+                                </div>
+                                <p className="text-xs sm:text-sm text-slate-600 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                  <span>Mobile: <strong>{b.farmerId?.phone || 'N/A'}</strong></span>
+                                  <span>•</span>
+                                  <span>Land Record: <strong>{b.farmerId?.landRecordNumber || 'Verified Land'}</strong></span>
+                                  {b.farmerId?.bankAccount && (
+                                    <>
+                                      <span>•</span>
+                                      <span>Bank: <strong>••••{b.farmerId.bankAccount.slice(-4)}</strong></span>
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => openWeighModal(b)}
+                              className="w-full md:w-auto shrink-0 flex items-center justify-center gap-2.5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white font-extrabold py-3.5 px-7 rounded-2xl text-sm sm:text-base shadow-md transition transform hover:-translate-y-0.5 cursor-pointer"
+                            >
+                              <Scale className="w-5 h-5 text-amber-300" />
+                              <span>Process Scale #1 (Weigh Produce)</span>
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // Subsequent queue tokens (idx > 0)
+                    return (
+                      <div
+                        key={b._id}
+                        className="bg-slate-50 hover:bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 hover:border-slate-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
                       >
-                        <Scale className="w-4 h-4 text-amber-400" />
-                        <span>Weigh Produce & Compute MSP</span>
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex items-center gap-3 sm:gap-4">
+                          <span className="w-8 h-8 rounded-xl bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center shrink-0 font-mono">
+                            #{idx + 1}
+                          </span>
+                          <span className="px-3 py-1.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-black font-mono shrink-0">
+                            {b.tokenNumber}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h5 className="font-bold text-slate-900 text-sm sm:text-base">
+                                {b.farmerId?.name || 'Farmer'}
+                              </h5>
+                              <span className="text-[10px] font-semibold px-2 py-0.5 bg-slate-200 text-slate-800 rounded-md">
+                                {b.slotId?.cropType || 'Produce'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                              <span>Mobile: {b.farmerId?.phone}</span>
+                              <span>•</span>
+                              <span>Checked in: {checkInTimeFormatted}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => openWeighModal(b)}
+                          className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-medium py-2.5 px-5 rounded-xl text-xs sm:text-sm shadow-xs transition cursor-pointer"
+                        >
+                          <Scale className="w-4 h-4 text-amber-400" />
+                          <span>Weigh Produce</span>
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>

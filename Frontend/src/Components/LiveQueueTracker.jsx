@@ -117,6 +117,13 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
   // -------------------------------------------------------------
   // PHASE 1 CALCULATION (Farmer at Home • status === 'booked')
   // -------------------------------------------------------------
+  const nowMs = Date.now()
+  const todayDate = new Date(nowMs)
+  const onePmMs = new Date(nowMs).setHours(13, 0, 0, 0)
+  const twoPmMs = new Date(nowMs).setHours(14, 0, 0, 0)
+  const isCurrentlyLunchBreak = queueData.isLunchBreak || (nowMs >= onePmMs && nowMs < twoPmMs)
+  const isCurrentlyPast5pm = queueData.isGateClosed || (todayDate.getHours() >= 17)
+
   let tokensAheadPreArrival = 0
   if (isBooked) {
     const myBookedIndex = bookedList.findIndex((b) => b.tokenNumber === myToken)
@@ -124,18 +131,33 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
     tokensAheadPreArrival = checkedInList.length + bookedAhead
   }
 
-  const estimatedWaitMinutesPreArrival = tokensAheadPreArrival * avgMin
-  const nowMs = Date.now()
-  const estimatedTurnTimeDate = new Date(nowMs + estimatedWaitMinutesPreArrival * 60 * 1000)
+  const rawWaitMinutesPreArrival = tokensAheadPreArrival * avgMin
+  let estimatedTurnTimeMs = nowMs + rawWaitMinutesPreArrival * 60 * 1000
+
+  // 1:00 PM - 2:00 PM Lunch Break Shift
+  if (nowMs >= onePmMs && nowMs < twoPmMs) {
+    // Current time is during lunch -> scale operations resume at 2:00 PM
+    estimatedTurnTimeMs = twoPmMs + rawWaitMinutesPreArrival * 60 * 1000
+  } else if (nowMs < onePmMs && estimatedTurnTimeMs >= onePmMs) {
+    // Starting before 1 PM and ending at or after 1 PM -> add 60 mins lunch shift
+    estimatedTurnTimeMs += 60 * 60 * 1000
+  }
+
+  const estimatedWaitMinutesPreArrival = Math.max(0, Math.round((estimatedTurnTimeMs - nowMs) / 60000))
+  const estimatedTurnTimeDate = new Date(estimatedTurnTimeMs)
   const formattedTurnTime = estimatedTurnTimeDate.toLocaleTimeString('en-IN', {
     hour: '2-digit',
     minute: '2-digit',
   })
 
   // 30 mins prior gate arrival advisory
-  const gateCallDate = new Date(estimatedTurnTimeDate.getTime() - 30 * 60 * 1000)
-  const isImmediateGateCall = gateCallDate.getTime() <= nowMs || tokensAheadPreArrival <= 2
-  const formattedGateTime = gateCallDate.toLocaleTimeString('en-IN', {
+  let gateCallMs = estimatedTurnTimeMs - 30 * 60 * 1000
+  if (gateCallMs >= onePmMs && gateCallMs < twoPmMs) {
+    gateCallMs = onePmMs + 45 * 60 * 1000 // Shift to 1:45 PM
+  }
+
+  const isImmediateGateCall = gateCallMs <= nowMs || tokensAheadPreArrival <= 2
+  const formattedGateTime = new Date(gateCallMs).toLocaleTimeString('en-IN', {
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -514,6 +536,50 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
             </>
           )}
         </div>
+
+        {/* Live Lunch Break Notice (1:00 PM - 2:00 PM) */}
+        {isCurrentlyLunchBreak && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs sm:text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-amber-950">
+                  🥪 Mandi Lunch Break in Progress (1:00 PM – 2:00 PM)
+                </h4>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Weighbridge scales are paused for official staff lunch. Scales and turn progression resume promptly at 2:00 PM.
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-bold font-mono bg-white px-3 py-1 rounded-xl border border-amber-300 text-amber-900 shrink-0 self-start sm:self-auto">
+              Resumes at 2:00 PM
+            </span>
+          </div>
+        )}
+
+        {/* 5:00 PM Gate Closure Notice */}
+        {isCurrentlyPast5pm && (
+          <div className="p-4 rounded-2xl bg-slate-900 text-white text-xs sm:text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center shrink-0">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold">Mandi Gate Entry Closed for Today (5:00 PM)</h4>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {isCheckedIn
+                    ? 'Your tractor is inside the yard. Scale #1 is on duty to complete weighing for all checked-in vehicles.'
+                    : 'Gate entry has closed for the day. Un-checked-in bookings are expired. Please book a slot for tomorrow.'}
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1 rounded-xl shrink-0 self-start sm:self-auto">
+              Gate Closed (5:00 PM)
+            </span>
+          </div>
+        )}
 
         {/* Contextual Advisory Banner */}
         {isCompleted ? (
