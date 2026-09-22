@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import api from '../api/client.js'
 import {
   Activity,
@@ -19,8 +19,11 @@ import {
   Calendar,
   PhoneCall,
 } from 'lucide-react'
+import { useLanguage } from '../context/LanguageContext.jsx'
 
 export default function LiveQueueTracker({ activeBookings = [], activeBooking, farmer, onRefresh }) {
+  const { t, getCropName } = useLanguage()
+
   // Normalize incoming bookings to an array
   const bookingsList = activeBookings.length > 0
     ? activeBookings
@@ -124,8 +127,88 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
   const isCurrentlyLunchBreak = queueData.isLunchBreak || (nowMs >= onePmMs && nowMs < twoPmMs)
   const isCurrentlyPast5pm = queueData.isGateClosed || (todayDate.getHours() >= 17)
 
+  // Date & Scheduling Context
+  const bookingDate = currentBooking?.startTime ? new Date(currentBooking.startTime) : null
+  const isBookingToday = bookingDate
+    ? bookingDate.toDateString() === todayDate.toDateString()
+    : true
+  const isBookingTomorrow = bookingDate
+    ? new Date(bookingDate.getFullYear(), bookingDate.getMonth(), bookingDate.getDate()).getTime() ===
+      new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1).getTime()
+    : false
+  const isBookingFuture = bookingDate
+    ? bookingDate.getTime() > new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate(), 23, 59, 59, 999).getTime()
+    : false
+
+  const formattedSlotTime = bookingDate
+    ? bookingDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    : '9:00 AM'
+  const formattedSlotDate = bookingDate
+    ? bookingDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : ''
+
+  // Calculate staggered arrival and turn time for a future booking token (12 min per tractor)
+  const futureSchedule = useMemo(() => {
+    if (!currentBooking?.startTime) {
+      return {
+        tokenSequence: 1,
+        formattedTurnTime: '9:00 AM',
+        formattedGateTime: '9:00 AM',
+      }
+    }
+
+    const token = currentBooking.tokenNumber || ''
+    const parts = token.split('-')
+    const tokenSequence = Math.max(1, parseInt(parts[1], 10) || 1)
+
+    const slotStart = new Date(currentBooking.startTime)
+    const slotStartMs = slotStart.getTime()
+    const avgMin = queueData.avgProcessingMinutes || 12
+
+    // Each tractor turn is offset by (tokenSequence - 1) * 12 mins
+    let turnMs = slotStartMs + (tokenSequence - 1) * avgMin * 60 * 1000
+
+    // Lunch pause (1:00 PM to 2:00 PM on that scheduled date)
+    const onePm = new Date(slotStart)
+    onePm.setHours(13, 0, 0, 0)
+    const twoPm = new Date(slotStart)
+    twoPm.setHours(14, 0, 0, 0)
+
+    if (slotStartMs < onePm.getTime() && turnMs >= onePm.getTime()) {
+      turnMs += 60 * 60 * 1000 // 60 min lunch pause
+    } else if (slotStartMs >= onePm.getTime() && slotStartMs < twoPm.getTime()) {
+      turnMs = twoPm.getTime() + (tokenSequence - 1) * avgMin * 60 * 1000
+    }
+
+    // Suggested gate arrival: 30 minutes before turn, but not earlier than slot start time (gate opening)
+    let gateArrivalMs = turnMs - 30 * 60 * 1000
+    if (gateArrivalMs < slotStartMs) {
+      gateArrivalMs = slotStartMs
+    }
+    if (gateArrivalMs >= onePm.getTime() && gateArrivalMs < twoPm.getTime()) {
+      gateArrivalMs = onePm.getTime() + 45 * 60 * 1000
+    }
+
+    const formattedTurnTime = new Date(turnMs).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    const formattedGateTime = new Date(gateArrivalMs).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+
+    return {
+      tokenSequence,
+      turnMs,
+      gateArrivalMs,
+      formattedTurnTime,
+      formattedGateTime,
+    }
+  }, [currentBooking?.startTime, currentBooking?.tokenNumber, queueData.avgProcessingMinutes])
+
   let tokensAheadPreArrival = 0
-  if (isBooked) {
+  if (isBooked && !isBookingFuture) {
     const myBookedIndex = bookedList.findIndex((b) => b.tokenNumber === myToken)
     const bookedAhead = myBookedIndex >= 0 ? myBookedIndex : 0
     tokensAheadPreArrival = checkedInList.length + bookedAhead
@@ -187,40 +270,45 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
   // -------------------------------------------------------------
   const steps = [
     {
-      title: 'Slot Booked',
-      subtitle: 'Confirmed',
+      title: t('step1Title'),
+      subtitle: t('step1Subtitle'),
       done: true,
     },
     {
-      title: 'Gate Check-In',
-      subtitle: isCompleted
-        ? 'Entry Done'
-        : isCheckedIn
-        ? 'Checked In at Mandi'
-        : isImmediateGateCall
-        ? 'Reach Gate Now!'
-        : `Arrive by ~${formattedGateTime}`,
+      title: t('step2Title'),
+        subtitle: isCompleted
+          ? t('step2EntryDone')
+          : isCheckedIn
+          ? t('step2CheckedIn')
+          : isBookingFuture
+          ? t('step2ArriveTomorrow', {
+              date: isBookingTomorrow ? t('tomorrowLabel') : formattedSlotDate,
+              time: futureSchedule.formattedGateTime,
+            })
+          : isImmediateGateCall
+          ? t('step2ReachGateNow')
+          : t('step2ArriveBy', { time: formattedGateTime }),
       done: isCheckedIn || isCompleted,
     },
     {
-      title: 'Weighbridge Scale',
+      title: t('step3Title'),
       subtitle: isCompleted
-        ? 'Weighing Done'
+        ? t('step3WeighingDone')
         : isAtScale
-        ? 'Now at Scale #1'
+        ? t('step3NowAtScale1')
         : isInYardQueue
-        ? `Queue #${yardPositionIndex + 1}`
-        : 'In Line',
+        ? t('step3QueueNum', { pos: yardPositionIndex + 1 })
+        : t('step3InLine'),
       done: isCompleted || isAtScale,
     },
     {
-      title: 'Produce Weighed',
-      subtitle: isCompleted ? 'J-Form Slip Issued' : 'Awaiting Scale',
+      title: t('step4Title'),
+      subtitle: isCompleted ? t('step4JFormIssued') : t('step4AwaitingScale'),
       done: isCompleted,
     },
     {
-      title: 'DBT Bank Payout',
-      subtitle: isPaid ? 'Credited to Bank' : isCompleted ? 'DBT in Transit' : 'Direct Deposit',
+      title: t('step5Title'),
+      subtitle: isPaid ? t('step5Credited') : isCompleted ? t('step5InTransit') : t('step5DirectDeposit'),
       done: isPaid,
     },
   ]
@@ -235,35 +323,40 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               {isCompleted ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Weighing Completed & Accepted • तौल पूर्ण
+                  {t('radarCompleted')}
                 </>
               ) : isCheckedIn ? (
                 <>
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-                  Live Mandi Yard Radar • लाइव यार्ड रडार
+                  {t('radarInYard')}
+                </>
+              ) : isBookingFuture ? (
+                <>
+                  <Calendar className="w-3.5 h-3.5 text-emerald-300" />
+                  {isBookingTomorrow ? t('scheduledForTomorrow') : t('scheduledForDate', { date: formattedSlotDate })}
                 </>
               ) : (
                 <>
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Pre-Arrival Turn Radar • अग्रिम टोकन रडार
+                  {t('radarPreArrival')}
                 </>
               )}
             </span>
           </div>
 
           <h2 className="text-xl sm:text-2xl font-bold mt-1.5 flex items-center gap-2">
-            <span>{currentBooking.centerName || 'Mandi Procurement Center'}</span>
+            <span>{currentBooking.centerName || t('mandiCenterDefault')}</span>
           </h2>
 
           <p className="text-xs sm:text-sm text-emerald-100 mt-1 flex items-center gap-2">
             <span>
-              {isCompleted ? 'Completed Token: ' : isCheckedIn ? 'In-Yard Token: ' : 'Advance Token: '}
-              <strong className="text-white underline font-mono">{myToken}</strong> ({currentBooking.cropType})
+              {isCompleted ? t('completedTokenPrefix') : isCheckedIn ? t('inYardTokenPrefix') : t('advanceTokenPrefix')}
+              <strong className="text-white underline font-mono">{myToken}</strong> ({getCropName(currentBooking.cropType)})
             </span>
             {lastUpdated && (
               <>
                 <span>•</span>
-                <span className="text-emerald-200 text-xs">Updated: {lastUpdated}</span>
+                <span className="text-emerald-200 text-xs">{t('updated')}: {lastUpdated}</span>
               </>
             )}
           </p>
@@ -278,7 +371,7 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
           className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white/15 hover:bg-white/25 active:bg-white/10 border border-white/20 rounded-xl text-xs font-semibold text-white transition cursor-pointer self-start sm:self-auto disabled:opacity-50 shadow-sm"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-300' : ''}`} />
-          <span>Refresh Queue</span>
+          <span>{t('refreshQueue')}</span>
         </button>
       </div>
 
@@ -286,7 +379,7 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
       {bookingsList.length > 1 && (
         <div className="bg-emerald-900/40 px-6 sm:px-8 py-3 border-b border-emerald-700/60 flex items-center gap-3 overflow-x-auto scrollbar-none">
           <span className="text-xs font-bold uppercase tracking-wider text-emerald-200 shrink-0 flex items-center gap-1.5">
-            <Ticket className="w-3.5 h-3.5 text-emerald-300" /> You have {bookingsList.length} Active Tokens:
+            <Ticket className="w-3.5 h-3.5 text-emerald-300" /> {t('activeTokensNotice', { count: bookingsList.length })}
           </span>
           <div className="flex items-center gap-2">
             {bookingsList.map((b, idx) => {
@@ -305,18 +398,18 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                   }`}
                 >
                   <span className="font-mono">{b.tokenNumber}</span>
-                  <span className="text-[10px] font-medium opacity-80">({b.cropType})</span>
+                  <span className="text-[10px] font-medium opacity-80">({getCropName(b.cropType)})</span>
                   {isBCompleted ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 bg-emerald-400/20 text-emerald-300 rounded border border-emerald-400/40">
-                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" /> Weighed
+                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" /> {t('weighedStatus')}
                     </span>
                   ) : isBCheckedIn ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 bg-amber-400/20 text-amber-300 rounded border border-amber-400/40">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> In Yard
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> {t('inYardStatus')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-emerald-400/15 text-emerald-200 rounded">
-                      <Clock className="w-2.5 h-2.5" /> Booked
+                      <Clock className="w-2.5 h-2.5" /> {t('bookedStatus')}
                     </span>
                   )}
                 </button>
@@ -341,10 +434,10 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                    <Scale className="w-4 h-4 text-emerald-700" /> Electronic Weighbridge #1
+                    <Scale className="w-4 h-4 text-emerald-700" /> {t('weighbridgeScale1')}
                   </span>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-700" /> तौल संपन्न
+                    <CheckCircle2 className="w-3 h-3 text-emerald-700" /> {t('weighedDone')}
                   </span>
                 </div>
 
@@ -352,22 +445,22 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                   {totalQtyKg > 0 ? (
                     <>
                       <span className="text-3xl sm:text-4xl font-black text-emerald-900 tracking-wider font-mono">
-                        {totalQtyKg.toLocaleString('en-IN')} <span className="text-xl font-bold">kg</span>
+                        {totalQtyKg.toLocaleString('en-IN')} <span className="text-xl font-bold">{t('kg')}</span>
                       </span>
                       <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
-                        {(totalQtyKg / 100).toFixed(2)} Quintals
+                        {(totalQtyKg / 100).toFixed(2)} {t('quintals')}
                       </span>
                     </>
                   ) : (
                     <span className="text-2xl sm:text-3xl font-black text-emerald-900 font-mono">
-                      Produce Weighed & Verified
+                      {t('produceWeighedVerified')}
                     </span>
                   )}
                 </div>
 
                 <p className="text-xs text-emerald-800 font-medium">
-                  {currentBooking.cropType} • Quality Grade: <strong>{displayGrade}</strong>
-                  {displayRate ? ` • Official MSP: ₹${displayRate}/kg` : ''}
+                  {getCropName(currentBooking.cropType)} • {t('qualityGrade')}: <strong>{displayGrade}</strong>
+                  {displayRate ? ` • ${t('officialMsp')}: ₹${displayRate}/${t('kg')}` : ''}
                 </p>
               </div>
 
@@ -375,7 +468,7 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                    <IndianRupee className="w-4 h-4 text-emerald-700" /> Total MSP Payout (देय राशि)
+                    <IndianRupee className="w-4 h-4 text-emerald-700" /> {t('totalMspPayout')}
                   </span>
                   <span
                     className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
@@ -386,11 +479,11 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                   >
                     {isPaid ? (
                       <>
-                        <CheckCheck className="w-3 h-3 text-emerald-700" /> DBT Disbursed
+                        <CheckCheck className="w-3 h-3 text-emerald-700" /> {t('dbtDisbursed')}
                       </>
                     ) : (
                       <>
-                        <Clock className="w-3 h-3 text-amber-700" /> DBT Queued
+                        <Clock className="w-3 h-3 text-amber-700" /> {t('dbtQueued')}
                       </>
                     )}
                   </span>
@@ -402,14 +495,12 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                     {totalAmountFormatted || '0'}
                   </span>
                   <span className="text-xs font-medium text-emerald-700">
-                    Token: <strong className="font-mono">{myToken}</strong>
+                    {t('tokenLabel')}: <strong className="font-mono">{myToken}</strong>
                   </span>
                 </div>
 
                 <p className="text-xs text-emerald-800 font-medium">
-                  {isPaid
-                    ? 'Payment disbursed directly into your linked bank account via Aadhaar DBT.'
-                    : 'Disbursement initiated. Government Treasury release expected within 24-48 hours.'}
+                  {isPaid ? t('dbtPaidDesc') : t('dbtQueuedDesc')}
                 </p>
               </div>
             </>
@@ -422,23 +513,21 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div className="bg-amber-50/80 border border-amber-200/90 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
-                    <Scale className="w-4 h-4 text-amber-600" /> Now Serving at Scale #1
+                    <Scale className="w-4 h-4 text-amber-600" /> {t('nowServingScale1')}
                   </span>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 bg-amber-200/70 text-amber-900 rounded-full">
-                    धर्मकांटा
+                    {t('scaleServingBadge')}
                   </span>
                 </div>
 
                 <div className="my-3">
                   <span className="text-3xl sm:text-4xl font-black text-amber-800 tracking-wider font-mono">
-                    {currentServingToken || 'Scale Open'}
+                    {currentServingToken || t('scaleOpen')}
                   </span>
                 </div>
 
                 <p className="text-xs text-amber-800 font-medium">
-                  {currentServingToken
-                    ? 'Tractor currently positioned on electronic weighbridge scale'
-                    : 'Scale is open and ready for the next arrival'}
+                  {currentServingToken ? t('scaleTractorPositioned') : t('scaleOpenReady')}
                 </p>
               </div>
 
@@ -446,10 +535,10 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                    <Truck className="w-4 h-4 text-emerald-600" /> In-Yard Position
+                    <Truck className="w-4 h-4 text-emerald-600" /> {t('inYardPosition')}
                   </span>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full">
-                    {currentBooking.cropType || 'Produce'}
+                    {getCropName(currentBooking.cropType) || 'Produce'}
                   </span>
                 </div>
 
@@ -460,51 +549,106 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
 
                   <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
                     {isAtScale
-                      ? '✨ Your Turn Now!'
+                      ? `✨ ${t('yourTurnNow')}`
                       : isInYardQueue
-                      ? `Queue #${yardPositionIndex + 1}`
-                      : 'Checked-In at Gate'}
+                      ? t('queuePos', { pos: yardPositionIndex + 1 })
+                      : t('checkedInAtGate')}
                   </span>
                 </div>
 
                 <p className="text-xs text-emerald-800 font-medium">
                   {isAtScale
-                    ? 'Please drive your tractor onto Scale #1 now!'
+                    ? t('driveScaleNow')
                     : isInYardQueue
-                    ? `${yardTractorsAhead} tractor${yardTractorsAhead === 1 ? '' : 's'} ahead of you in yard line`
-                    : 'Gate entry verified • Syncing with weighbridge dispatch...'}
+                    ? t('tractorsAheadYard', { count: yardTractorsAhead, plural: yardTractorsAhead === 1 ? '' : 's' })
+                    : t('gateVerifiedSync')}
+                </p>
+              </div>
+            </>
+          ) : isBookingFuture ? (
+            /* ============================================================ */
+            /* SCENARIO 3A: SCHEDULED FOR TOMORROW / FUTURE DATE           */
+            /* ============================================================ */
+            <>
+              {/* Box 1: Staggered Gate Arrival Time */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-emerald-600" /> {t('scheduledGateArrival')}
+                  </span>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded-full">
+                    {t('turnNumberLabel', { num: futureSchedule.tokenSequence })}
+                  </span>
+                </div>
+
+                <div className="my-3 flex items-baseline gap-3">
+                  <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-wider font-mono">
+                    ~{futureSchedule.formattedGateTime}
+                  </span>
+                  <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200">
+                    {isBookingTomorrow ? t('scheduledForTomorrow') : t('scheduledForDate', { date: formattedSlotDate })}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 font-medium">
+                  {t('estimatedScaleTurnTime')}: <strong className="font-mono text-emerald-900">~{futureSchedule.formattedTurnTime}</strong>
+                </p>
+              </div>
+
+              {/* Box 2: Your Advance Token & Gate Readiness */}
+              <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+                    <Ticket className="w-4 h-4 text-emerald-600" /> {t('yourAdvanceBooking')}
+                  </span>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded-full">
+                    {t('gateCheckInPending')}
+                  </span>
+                </div>
+
+                <div className="my-3 flex items-baseline gap-3">
+                  <span className="text-3xl sm:text-4xl font-black text-emerald-900 tracking-wider font-mono">
+                    {myToken}
+                  </span>
+                  <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
+                    {getCropName(currentBooking.cropType)}
+                  </span>
+                </div>
+
+                <p className="text-xs text-emerald-800 font-medium">
+                  {t('gateOpensTomorrowDesc')}
                 </p>
               </div>
             </>
           ) : (
             /* ============================================================ */
-            /* SCENARIO 3: FARMER AT HOME (ADVANCE BOOKED - PRE-ARRIVAL)     */
+            /* SCENARIO 3B: TODAY PRE-ARRIVAL (FARMER AT HOME TODAY)        */
             /* ============================================================ */
             <>
               {/* Box 1: Scale Status at Mandi */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <Scale className="w-4 h-4 text-emerald-600" /> Mandi Scale #1 Currently Serving
+                    <Scale className="w-4 h-4 text-emerald-600" /> {t('mandiScaleServing')}
                   </span>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 bg-slate-200 text-slate-800 rounded-full">
-                    धर्मकांटा
+                    {t('scaleServingBadge')}
                   </span>
                 </div>
 
                 <div className="my-3 flex items-baseline gap-3">
                   <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-wider font-mono">
-                    {currentServingToken || 'Scale Open'}
+                    {currentServingToken || t('scaleOpenHome')}
                   </span>
                   {currentServingToken && (
                     <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200">
-                      Processing Now
+                      {t('processingNow')}
                     </span>
                   )}
                 </div>
 
                 <p className="text-xs text-slate-600 font-medium">
-                  {checkedInList.length} tractor{checkedInList.length === 1 ? '' : 's'} currently lined up inside the mandi yard.
+                  {t('tractorsLinedUpYard', { count: checkedInList.length, plural: checkedInList.length === 1 ? '' : 's' })}
                 </p>
               </div>
 
@@ -512,10 +656,10 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-5 flex flex-col justify-between shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                    <Ticket className="w-4 h-4 text-emerald-600" /> Your Advance Booking
+                    <Ticket className="w-4 h-4 text-emerald-600" /> {t('yourAdvanceBooking')}
                   </span>
                   <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-200/80 text-emerald-900 rounded-full">
-                    {currentBooking.cropType}
+                    {getCropName(currentBooking.cropType)}
                   </span>
                 </div>
 
@@ -525,12 +669,16 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                   </span>
 
                   <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
-                    {tokensAheadPreArrival === 0 ? 'Next in Turn' : `${tokensAheadPreArrival} Tokens Ahead`}
+                    {tokensAheadPreArrival === 0 ? t('nextInTurn') : t('tokensAheadPreArrival', { count: tokensAheadPreArrival })}
                   </span>
                 </div>
 
                 <p className="text-xs text-emerald-800 font-medium">
-                  Estimated scale turn at <strong>~{formattedTurnTime}</strong> ({Math.round(estimatedWaitMinutesPreArrival / 60)}h {estimatedWaitMinutesPreArrival % 60}m)
+                  {t('estimatedScaleTurn', {
+                    time: formattedTurnTime,
+                    hours: Math.floor(estimatedWaitMinutesPreArrival / 60),
+                    mins: estimatedWaitMinutesPreArrival % 60,
+                  })}
                 </p>
               </div>
             </>
@@ -538,7 +686,7 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
         </div>
 
         {/* Live Lunch Break Notice (1:00 PM - 2:00 PM) */}
-        {isCurrentlyLunchBreak && (
+        {isCurrentlyLunchBreak && isBookingToday && (
           <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs sm:text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
@@ -546,37 +694,35 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               </div>
               <div>
                 <h4 className="font-bold text-amber-950">
-                  🥪 Mandi Lunch Break in Progress (1:00 PM – 2:00 PM)
+                  🥪 {t('lunchBreakTitle')}
                 </h4>
                 <p className="text-xs text-amber-800 mt-0.5">
-                  Weighbridge scales are paused for official staff lunch. Scales and turn progression resume promptly at 2:00 PM.
+                  {t('lunchBreakDesc')}
                 </p>
               </div>
             </div>
             <span className="text-xs font-bold font-mono bg-white px-3 py-1 rounded-xl border border-amber-300 text-amber-900 shrink-0 self-start sm:self-auto">
-              Resumes at 2:00 PM
+              {t('resumesAtTwoPm')}
             </span>
           </div>
         )}
 
         {/* 5:00 PM Gate Closure Notice */}
-        {isCurrentlyPast5pm && (
+        {isCurrentlyPast5pm && isBookingToday && (
           <div className="p-4 rounded-2xl bg-slate-900 text-white text-xs sm:text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center shrink-0">
                 <Building2 className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-bold">Mandi Gate Entry Closed for Today (5:00 PM)</h4>
+                <h4 className="font-bold">{t('gateClosedTitle')}</h4>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  {isCheckedIn
-                    ? 'Your tractor is inside the yard. Scale #1 is on duty to complete weighing for all checked-in vehicles.'
-                    : 'Gate entry has closed for the day. Un-checked-in bookings are expired. Please book a slot for tomorrow.'}
+                  {isCheckedIn ? t('gateClosedInYardDesc') : t('gateClosedHomeDesc')}
                 </p>
               </div>
             </div>
             <span className="text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1 rounded-xl shrink-0 self-start sm:self-auto">
-              Gate Closed (5:00 PM)
+              {t('gateClosedBadge')}
             </span>
           </div>
         )}
@@ -587,7 +733,12 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
             <Sparkles className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             <div>
               <span>
-                <strong>Weighing Complete for Token {myToken}!</strong> Your {currentBooking.cropType} consignment has been weighed and accepted. Total MSP amount of <strong>₹{totalAmountFormatted || '0'}</strong> is registered for Direct Benefit Transfer (DBT){farmer?.bankAccount ? ` to your bank account ending in ••••${farmer.bankAccount.slice(-4)}` : ''}.
+                <strong>{t('congratsWeighedTitle', { token: myToken })}</strong>{' '}
+                {t('congratsWeighedBody', {
+                  crop: getCropName(currentBooking.cropType),
+                  amount: totalAmountFormatted || '0',
+                  bankSuffix: farmer?.bankAccount ? t('bankAccountEnding', { last4: farmer.bankAccount.slice(-4) }) : '',
+                })}
               </span>
             </div>
           </div>
@@ -608,17 +759,52 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
             <div>
               {isAtScale ? (
                 <span>
-                  <strong>It is your turn for {myToken}!</strong> Drive your tractor onto Dharamkanta Scale #1 now. The weighbridge officer is ready for tare/gross weighing.
+                  <strong>{t('yardTurnNowTitle', { token: myToken })}</strong> {t('yardTurnNowBody')}
                 </span>
               ) : yardPositionIndex <= 2 ? (
                 <span>
-                  <strong>Get ready for {myToken}!</strong> Only {yardTractorsAhead} tractor{yardTractorsAhead === 1 ? '' : 's'} ahead. Please start your tractor and stay near the weighbridge ramp.
+                  <strong>{t('yardGetReadyTitle', { token: myToken })}</strong>{' '}
+                  {t('yardGetReadyBody', { count: yardTractorsAhead, plural: yardTractorsAhead === 1 ? '' : 's' })}
                 </span>
               ) : (
                 <span>
-                  <strong>Relax comfortably in the farmer rest shed!</strong> There are {yardTractorsAhead} tractors ahead in the yard. We will notify you when 5 tractors remain.
+                  <strong>{t('yardRestShedTitle')}</strong>{' '}
+                  {t('yardRestShedBody', { count: yardTractorsAhead })}
                 </span>
               )}
+            </div>
+          </div>
+        ) : isBookingFuture ? (
+          /* Scheduled Future Date Notice Banner with Staggered Arrival */
+          <div className="p-4 sm:p-5 rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-950 text-xs sm:text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-200/80 text-emerald-900 flex items-center justify-center shrink-0">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm sm:text-base text-emerald-950">
+                  {t('futureBookingNoticeTitle', {
+                    date: isBookingTomorrow ? t('tomorrowLabel') : formattedSlotDate,
+                    time: futureSchedule.formattedGateTime,
+                  })}
+                </h4>
+                <p className="mt-1 text-xs text-emerald-800 leading-relaxed">
+                  {t('futureStaggeredNotice', {
+                    arrivalTime: futureSchedule.formattedGateTime,
+                    turnTime: futureSchedule.formattedTurnTime,
+                    turn: futureSchedule.tokenSequence,
+                  })}
+                </p>
+              </div>
+            </div>
+
+            <div className="self-end sm:self-auto shrink-0 text-right bg-white/80 px-4 py-2.5 rounded-xl border border-emerald-200/60 shadow-2xs">
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">
+                {t('suggestedGateArrival')}
+              </span>
+              <span className="text-base sm:text-lg font-black text-emerald-800 font-mono">
+                ~{futureSchedule.formattedGateTime}
+              </span>
             </div>
           </div>
         ) : (
@@ -641,79 +827,88 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
               <div>
                 <h4 className="font-bold text-sm sm:text-base">
                   {isImmediateGateCall
-                    ? `🚨 Turn Approaching for ${myToken}! Please Proceed to Gate`
-                    : `🌾 Relax at Home: Your Turn is Estimated at ~${formattedTurnTime}`}
+                    ? t('preArrivalUrgentTitle', { token: myToken })
+                    : t('preArrivalRelaxTitle', { time: formattedTurnTime })}
                 </h4>
                 <p className="mt-1 text-xs opacity-90 leading-relaxed">
-                  {isImmediateGateCall ? (
-                    <span>
-                      There are only <strong>{tokensAheadPreArrival}</strong> token{tokensAheadPreArrival === 1 ? '' : 's'} ahead. Drive to {currentBooking.centerName} Gate #1 now to check in and join the scale queue.
-                    </span>
-                  ) : (
-                    <span>
-                      The scale is currently processing token <strong>{currentServingToken || 'earlier slots'}</strong> with <strong>{tokensAheadPreArrival}</strong> tokens ahead of you today. Please arrive at the Mandi Gate <strong>30 minutes before your turn</strong> (by <strong>~{formattedGateTime}</strong>) to check in.
-                    </span>
-                  )}
+                  {isImmediateGateCall
+                    ? t('preArrivalUrgentBody', {
+                        count: tokensAheadPreArrival,
+                        plural: tokensAheadPreArrival === 1 ? '' : 's',
+                        center: currentBooking.centerName || t('mandiCenterDefault'),
+                      })
+                    : t('preArrivalRelaxBody', {
+                        servingToken: currentServingToken || t('earlierSlots'),
+                        ahead: tokensAheadPreArrival,
+                        gateTime: formattedGateTime,
+                      })}
                 </p>
               </div>
             </div>
 
             <div className="self-end sm:self-auto shrink-0 text-right bg-white/70 px-4 py-2.5 rounded-xl border border-emerald-200/60 shadow-2xs">
               <span className="text-[10px] text-gray-500 uppercase font-bold block">
-                Suggested Gate Arrival
+                {t('suggestedGateArrival')}
               </span>
               <span className="text-base sm:text-lg font-black text-emerald-800 font-mono">
-                {isImmediateGateCall ? 'Immediately' : `~${formattedGateTime}`}
+                {isImmediateGateCall ? t('immediately') : `~${formattedGateTime}`}
               </span>
             </div>
           </div>
         )}
 
-        {/* Live Traffic & Velocity Status */}
-        <div className="bg-slate-50 border border-gray-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-emerald-700 shrink-0 shadow-xs">
-              <Building2 className="w-5 h-5 text-emerald-700" />
+        {/* Live Traffic & Velocity Status (Only shown on the actual day of the visit; hidden for future bookings) */}
+        {!isBookingFuture && (
+          <div className="bg-slate-50 border border-gray-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-emerald-700 shrink-0 shadow-xs">
+                <Building2 className="w-5 h-5 text-emerald-700" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                  <span>{t('yardTrafficTitle', { center: currentBooking.centerName || t('mandiCenterDefault') })}</span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full">
+                    {t('fastFlow')}
+                  </span>
+                </h4>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {t('yardTrafficDesc', {
+                    yardCount: checkedInList.length,
+                    yardPlural: checkedInList.length === 1 ? '' : 's',
+                    bookedCount: bookedList.length,
+                    avgMin,
+                  })}
+                </p>
+              </div>
             </div>
-            <div>
-              <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-                <span>Mandi Yard Traffic ({currentBooking.centerName})</span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full">
-                  Fast Flow (सामान्य प्रवाह)
-                </span>
-              </h4>
-              <p className="text-xs text-gray-600 mt-0.5">
-                {checkedInList.length} tractor{checkedInList.length === 1 ? '' : 's'} currently in yard queue • {bookedList.length} advance tokens scheduled today • Average scale time: ~{avgMin} mins
-              </p>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-4 self-end md:self-auto text-right">
-            <div>
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">
-                {isCheckedIn ? 'Yard Scale Wait Time' : 'Estimated Time to Turn'}
-              </span>
-              <span className="text-lg font-black text-emerald-800">
-                {isCompleted
-                  ? '0 mins (Procured)'
-                  : isCheckedIn
-                  ? isAtScale
-                    ? '0 mins (At Scale)'
-                    : `~${estimatedYardWaitMinutes} minutes`
-                  : `~${estimatedWaitMinutesPreArrival} mins (~${formattedTurnTime})`}
-              </span>
+            <div className="flex items-center gap-4 self-end md:self-auto text-right">
+              <div>
+                <span className="text-[10px] text-gray-500 uppercase font-bold block">
+                  {isCheckedIn ? t('yardWaitTimeLabel') : t('estimatedTimeToTurnLabel')}
+                </span>
+                <span className="text-lg font-black text-emerald-800">
+                  {isCompleted
+                    ? t('zeroMinsProcured')
+                    : isCheckedIn
+                    ? isAtScale
+                      ? t('zeroMinsAtScale')
+                      : t('approxMinutes', { mins: estimatedYardWaitMinutes })
+                    : t('approxMinsWithTime', { mins: estimatedWaitMinutesPreArrival, time: formattedTurnTime })}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* 5-Step Mandi Journey Stepper */}
         <div className="pt-4 border-t border-gray-100">
           <div className="flex items-center justify-between mb-3">
             <h5 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-              Procurement Lifecycle for Token {myToken} (तौल व भुगतान प्रगति)
+              {t('procurementLifecycle', { token: myToken })}
             </h5>
             <span className="text-xs font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-              {currentBooking.cropType}
+              {getCropName(currentBooking.cropType)}
             </span>
           </div>
 
@@ -728,7 +923,7 @@ export default function LiveQueueTracker({ activeBookings = [], activeBooking, f
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold text-gray-500">Step {idx + 1}</span>
+                  <span className="text-[10px] font-mono font-bold text-gray-500">{t('stepNum', { num: idx + 1 })}</span>
                   {step.done ? (
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                   ) : (

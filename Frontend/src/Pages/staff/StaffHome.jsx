@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/client.js'
 import StaffNavbar from '../../Components/StaffNavbar.jsx'
@@ -23,6 +23,8 @@ import {
   Loader2,
   Check,
   Ticket,
+  History,
+  X,
 } from 'lucide-react'
 
 // Standard MSP Reference Rates (Rs per kg)
@@ -55,6 +57,10 @@ export default function StaffHome() {
   const [actionLoading, setActionLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [dateFilter, setDateFilter] = useState('today')
+  const [isStaffHistoryModalOpen, setIsStaffHistoryModalOpen] = useState(false)
+  const [staffHistoryTab, setStaffHistoryTab] = useState('weighed') // 'weighed' | 'past'
+  const [staffHistorySearch, setStaffHistorySearch] = useState('')
   const [feedbackMessage, setFeedbackMessage] = useState(null)
 
   // Weighing Modal State
@@ -369,15 +375,153 @@ export default function StaffHome() {
     }
   }
 
-  // Filter Bookings by search term
-  const filteredBookings = bookings.filter((b) => {
-    if (!searchTerm.trim()) return true
-    const term = searchTerm.toLowerCase()
-    const tokenMatch = b.tokenNumber?.toLowerCase().includes(term)
-    const nameMatch = b.farmerId?.name?.toLowerCase().includes(term)
-    const phoneMatch = b.farmerId?.phone?.includes(term)
-    return tokenMatch || nameMatch || phoneMatch
-  })
+  // Local date helper (YYYY-MM-DD)
+  const getLocalDateString = (d) => {
+    const date = d ? new Date(d) : new Date()
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const todayStr = getLocalDateString(new Date())
+  const tomorrowObj = new Date()
+  tomorrowObj.setDate(tomorrowObj.getDate() + 1)
+  const tomorrowStr = getLocalDateString(tomorrowObj)
+
+  // Calculate booking counts per date
+  const dateCounts = useMemo(() => {
+    const counts = { all: bookings.length }
+    bookings.forEach((b) => {
+      if (b.slotId?.startTime) {
+        const dStr = getLocalDateString(b.slotId.startTime)
+        counts[dStr] = (counts[dStr] || 0) + 1
+      }
+    })
+    return counts
+  }, [bookings])
+
+  // Extract upcoming dates beyond tomorrow (strictly dateStr > tomorrowStr)
+  const upcomingDateOptions = useMemo(() => {
+    const datesSet = new Set()
+    bookings.forEach((b) => {
+      if (b.slotId?.startTime) {
+        const dStr = getLocalDateString(b.slotId.startTime)
+        if (dStr > tomorrowStr) {
+          datesSet.add(dStr)
+        }
+      }
+    })
+    return Array.from(datesSet).sort().map((dStr) => {
+      const dObj = new Date(`${dStr}T00:00:00`)
+      return {
+        dateStr: dStr,
+        label: dObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        count: dateCounts[dStr] || 0,
+      }
+    })
+  }, [bookings, tomorrowStr, dateCounts])
+
+  // Past dates bookings archive (strictly dateStr < todayStr)
+  const pastBookings = useMemo(() => {
+    return bookings.filter((b) => {
+      if (!b.slotId?.startTime) return false
+      const dStr = getLocalDateString(b.slotId.startTime)
+      return dStr < todayStr
+    })
+  }, [bookings, todayStr])
+
+  // Total count of active today + upcoming bookings
+  const upcomingTotalCount = useMemo(() => {
+    return bookings.filter((b) => {
+      if (!b.slotId?.startTime) return true
+      const dStr = getLocalDateString(b.slotId.startTime)
+      return dStr >= todayStr
+    }).length
+  }, [bookings, todayStr])
+
+  // Active slots (strictly today and upcoming dates)
+  const activeSlots = useMemo(() => {
+    return slots.filter((s) => {
+      if (!s.startTime) return false
+      const dStr = getLocalDateString(s.startTime)
+      return dStr >= todayStr
+    })
+  }, [slots, todayStr])
+
+  // Filtered procurements for staff history modal
+  const filteredStaffProcurements = useMemo(() => {
+    if (!staffHistorySearch.trim()) return procurements
+    const term = staffHistorySearch.trim().toLowerCase()
+    return procurements.filter((p) => {
+      const certMatch = p.certificateNumber?.toLowerCase().includes(term)
+      const nameMatch = p.farmerId?.name?.toLowerCase().includes(term)
+      const phoneMatch = p.farmerId?.phone?.includes(term)
+      const cropMatch = (p.items && p.items[0]?.cropType?.toLowerCase().includes(term)) || p.cropType?.toLowerCase().includes(term)
+      return certMatch || nameMatch || phoneMatch || cropMatch
+    })
+  }, [procurements, staffHistorySearch])
+
+  // Filtered past bookings for staff history modal
+  const filteredStaffPastBookings = useMemo(() => {
+    if (!staffHistorySearch.trim()) return pastBookings
+    const term = staffHistorySearch.trim().toLowerCase()
+    return pastBookings.filter((b) => {
+      const tokenMatch = b.tokenNumber?.toLowerCase().includes(term)
+      const nameMatch = b.farmerId?.name?.toLowerCase().includes(term)
+      const phoneMatch = b.farmerId?.phone?.includes(term)
+      const cropMatch = b.slotId?.cropType?.toLowerCase().includes(term)
+      return tokenMatch || nameMatch || phoneMatch || cropMatch
+    })
+  }, [pastBookings, staffHistorySearch])
+
+  // Filter Bookings by search term, status, date, and sort chronologically (strictly Today & Upcoming)
+  const filteredBookings = useMemo(() => {
+    return bookings
+      .filter((b) => {
+        // Exclude past date appointments from Gate Check-In (they belong to History!)
+        const bookingDateStr = b.slotId?.startTime ? getLocalDateString(b.slotId.startTime) : null
+        if (bookingDateStr && bookingDateStr < todayStr) {
+          return false
+        }
+
+        // Status filter
+        if (statusFilter !== 'all' && b.status !== statusFilter) {
+          return false
+        }
+
+        // Date filter
+        if (dateFilter === 'today') {
+          if (bookingDateStr !== todayStr) return false
+        } else if (dateFilter === 'tomorrow') {
+          if (bookingDateStr !== tomorrowStr) return false
+        } else if (dateFilter !== 'all_upcoming') {
+          if (bookingDateStr !== dateFilter) return false
+        }
+
+        // Search term
+        if (searchTerm.trim()) {
+          const term = searchTerm.trim().toLowerCase()
+          const tokenMatch = b.tokenNumber?.toLowerCase().includes(term)
+          const nameMatch = b.farmerId?.name?.toLowerCase().includes(term)
+          const phoneMatch = b.farmerId?.phone?.includes(term)
+          return tokenMatch || nameMatch || phoneMatch
+        }
+
+        return true
+      })
+      .sort((a, b) => {
+        // Earlier scheduled appointments first (Sep 22 before Sep 23, 9 AM before 10 AM)
+        const timeA = a.slotId?.startTime ? new Date(a.slotId.startTime).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0)
+        const timeB = b.slotId?.startTime ? new Date(b.slotId.startTime).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0)
+        if (timeA !== timeB) return timeA - timeB
+
+        // Suffix sequence number (WHE-1 before WHE-2 before WHE-10)
+        const seqA = parseInt(a.tokenNumber?.split('-')[1], 10) || 0
+        const seqB = parseInt(b.tokenNumber?.split('-')[1], 10) || 0
+        return seqA - seqB
+      })
+  }, [bookings, statusFilter, dateFilter, searchTerm, todayStr, tomorrowStr])
 
   // Checked-in farmers ready for weighing (ordered strictly by gate arrival time)
   const checkedInBookings = bookings
@@ -404,6 +548,8 @@ export default function StaffHome() {
         selectedCenter={selectedCenter}
         centers={centers}
         onCenterChange={(c) => setSelectedCenter(c)}
+        onOpenHistory={() => setIsStaffHistoryModalOpen(true)}
+        historyCount={procurements.length + pastBookings.length}
       />
 
       {/* Floating Feedback Notification */}
@@ -518,7 +664,7 @@ export default function StaffHome() {
             }`}
           >
             <ShieldCheck className="w-4 h-4 text-slate-700" />
-            <span>Gate Check-In ({bookings.length})</span>
+            <span>Gate Check-In</span>
           </button>
 
           <button
@@ -566,7 +712,7 @@ export default function StaffHome() {
             }`}
           >
             <PlusCircle className="w-4 h-4 text-slate-700" />
-            <span>Slot Management ({slots.length})</span>
+            <span>Slot Management ({activeSlots.length})</span>
           </button>
         </div>
 
@@ -588,7 +734,24 @@ export default function StaffHome() {
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                {/* Date Dropdown (Strictly Today & Upcoming Dates) */}
+                <select
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-800 font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-700 cursor-pointer shadow-2xs"
+                >
+                  <option value="today">📅 Today ({dateCounts[todayStr] || 0})</option>
+                  <option value="tomorrow">📅 Tomorrow ({dateCounts[tomorrowStr] || 0})</option>
+                  {upcomingDateOptions.map((d) => (
+                    <option key={d.dateStr} value={d.dateStr}>
+                      📅 {d.label} ({d.count})
+                    </option>
+                  ))}
+                  <option value="all_upcoming">📅 All Upcoming ({upcomingTotalCount})</option>
+                </select>
+
+                {/* Status Dropdown */}
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
@@ -608,7 +771,18 @@ export default function StaffHome() {
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
                 <h3 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-2">
                   <Ticket className="w-4 h-4 text-slate-700" />
-                  <span>Appointments & Tokens for {selectedCenter?.name}</span>
+                  <span>
+                    Appointments for {selectedCenter?.name} •{' '}
+                    <span className="text-slate-500 font-normal">
+                      {dateFilter === 'today'
+                        ? 'Today'
+                        : dateFilter === 'tomorrow'
+                        ? 'Tomorrow'
+                        : dateFilter === 'all_upcoming'
+                        ? 'All Upcoming Dates'
+                        : dateFilter}
+                    </span>
+                  </span>
                 </h3>
                 <span className="text-xs text-slate-500 font-mono">
                   Showing {filteredBookings.length} records
@@ -625,12 +799,30 @@ export default function StaffHome() {
                   <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
                     <Ticket className="w-6 h-6" />
                   </div>
-                  <h4 className="font-bold text-slate-700 text-sm">No Appointments Found</h4>
+                  <h4 className="font-bold text-slate-700 text-sm">
+                    {dateFilter === 'today' ? 'No Appointments Scheduled for Today' : 'No Appointments Found'}
+                  </h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    {searchTerm
-                      ? `No bookings match your search "${searchTerm}".`
-                      : 'No farmer appointments booked for this filter yet. You can create slots in the Slot Management tab.'}
+                    {dateFilter === 'today' && (dateCounts[tomorrowStr] || 0) > 0 ? (
+                      <span>
+                        There are no bookings for today. However, there are{' '}
+                        <strong className="text-slate-800 font-bold">{dateCounts[tomorrowStr]} appointments</strong> scheduled for tomorrow.
+                      </span>
+                    ) : searchTerm ? (
+                      `No bookings match your search "${searchTerm}".`
+                    ) : (
+                      'No farmer appointments found for this filter.'
+                    )}
                   </p>
+                  {dateFilter === 'today' && (dateCounts[tomorrowStr] || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDateFilter('tomorrow')}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer transition mt-2"
+                    >
+                      <span>View Tomorrow's Appointments ({dateCounts[tomorrowStr]})</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
@@ -700,14 +892,34 @@ export default function StaffHome() {
                         {/* Right: Actions */}
                         <div className="flex items-center gap-2 self-end sm:self-center">
                           {isBooked && (
-                            <button
-                              onClick={() => handleCheckIn(b._id, b.tokenNumber)}
-                              disabled={actionLoading}
-                              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-medium text-xs rounded-xl shadow-sm transition cursor-pointer disabled:opacity-50"
-                            >
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Check In (Gate Entry)</span>
-                            </button>
+                            b.slotId?.startTime && getLocalDateString(b.slotId.startTime) !== todayStr ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                                  📅 Scheduled for {new Date(b.slotId.startTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Notice: Token ${b.tokenNumber} is booked for ${new Date(b.slotId.startTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}. Confirm early gate check-in?`)) {
+                                      handleCheckIn(b._id, b.tokenNumber)
+                                    }
+                                  }}
+                                  disabled={actionLoading}
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer border border-slate-200"
+                                  title="Check in ahead of appointment date"
+                                >
+                                  <span>Early Check-In</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handleCheckIn(b._id, b.tokenNumber)}
+                                disabled={actionLoading}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-medium text-xs rounded-xl shadow-sm transition cursor-pointer disabled:opacity-50"
+                              >
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Check In (Gate Entry)</span>
+                              </button>
+                            )
                           )}
 
                           {isCheckedIn && (
@@ -1106,11 +1318,11 @@ export default function StaffHome() {
                     onChange={(e) => setNewSlotData((prev) => ({ ...prev, crop_type: e.target.value }))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-slate-700 focus:outline-none"
                   >
-                    <option value="Wheat">Wheat (गेहूं) - MSP ₹22.75/kg</option>
-                    <option value="Paddy">Paddy (धान) - MSP ₹21.83/kg</option>
-                    <option value="Maize">Maize (मक्का) - MSP ₹20.90/kg</option>
-                    <option value="Mustard">Mustard (सरसों) - MSP ₹56.50/kg</option>
-                    <option value="Barley">Barley (जौ) - MSP ₹18.50/kg</option>
+                    <option value="Wheat">Wheat - MSP ₹22.75/kg</option>
+                    <option value="Paddy">Paddy - MSP ₹21.83/kg</option>
+                    <option value="Maize">Maize - MSP ₹20.90/kg</option>
+                    <option value="Mustard">Mustard - MSP ₹56.50/kg</option>
+                    <option value="Barley">Barley - MSP ₹18.50/kg</option>
                   </select>
                 </div>
 
@@ -1188,11 +1400,11 @@ export default function StaffHome() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-slate-700" />
-                  <span>Current Mandi Slots ({slots.length})</span>
+                  <span>Current Mandi Slots ({activeSlots.length})</span>
                 </h3>
               </div>
 
-              {slots.length === 0 ? (
+              {activeSlots.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 space-y-2">
                   <Calendar className="w-10 h-10 text-slate-300 mx-auto" />
                   <p className="text-sm font-bold text-slate-700">No active slots scheduled</p>
@@ -1202,7 +1414,7 @@ export default function StaffHome() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[550px] overflow-y-auto pr-1">
-                  {slots.map((s) => {
+                  {activeSlots.map((s) => {
                     const isFull = s.seatsLeft === 0
                     return (
                       <div
@@ -1298,11 +1510,11 @@ export default function StaffHome() {
                   }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:bg-white focus:ring-2 focus:ring-slate-700 focus:outline-none"
                 >
-                  <option value="Wheat">Wheat (गेहूं)</option>
-                  <option value="Paddy">Paddy (धान)</option>
-                  <option value="Maize">Maize (मक्का)</option>
-                  <option value="Mustard">Mustard (सरसों)</option>
-                  <option value="Barley">Barley (जौ)</option>
+                  <option value="Wheat">Wheat</option>
+                  <option value="Paddy">Paddy</option>
+                  <option value="Maize">Maize</option>
+                  <option value="Mustard">Mustard</option>
+                  <option value="Barley">Barley</option>
                 </select>
               </div>
 
@@ -1449,6 +1661,263 @@ export default function StaffHome() {
             >
               Done & Return to Dashboard
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Procurement & Appointments History Modal */}
+      {isStaffHistoryModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="bg-slate-900 px-6 py-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Mandi Operations History & Archive</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {selectedCenter?.name} • Historical weighments, past appointments, and completed ledgers
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsStaffHistoryModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter Tabs & Search */}
+            <div className="px-6 pt-4 pb-3 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStaffHistoryTab('weighed')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffHistoryTab === 'weighed'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Scale className="w-3.5 h-3.5" />
+                  <span>Weighed & Procured</span>
+                  <span className="ml-1 px-1.5 py-0.2 bg-white/20 rounded-full text-[10px]">
+                    {procurements.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStaffHistoryTab('past')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffHistoryTab === 'past'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Past Appointments</span>
+                  <span className="ml-1 px-1.5 py-0.2 bg-white/20 rounded-full text-[10px]">
+                    {pastBookings.length}
+                  </span>
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={staffHistorySearch}
+                  onChange={(e) => setStaffHistorySearch(e.target.value)}
+                  placeholder="Search token, farmer..."
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-700"
+                />
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-3">
+              {staffHistoryTab === 'weighed' ? (
+                // Weighed Procurements List
+                filteredStaffProcurements.length === 0 ? (
+                  <div className="text-center py-12 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-xl text-slate-400 mb-2">
+                      ⚖️
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-800">No Weighed Records Found</h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      {staffHistorySearch
+                        ? `No procurements match "${staffHistorySearch}".`
+                        : 'Weighed tokens from Scale #1 will be permanently archived here with their weighment certificate and DBT disbursement status.'}
+                    </p>
+                  </div>
+                ) : (
+                  filteredStaffProcurements.map((p) => {
+                    const totalKg = (p.items || []).reduce((sum, it) => sum + (Number(it.quantityKg) || 0), 0)
+                    const cropType = (p.items && p.items[0]?.cropType) || p.cropType || 'Produce'
+                    const pDate = p.createdAt ? new Date(p.createdAt) : null
+                    const isPaid = p.payment?.status === 'paid'
+                    const isProcessing = p.payment?.status === 'processing'
+
+                    return (
+                      <div
+                        key={p._id}
+                        className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-slate-800 shrink-0 font-mono">
+                            <Scale className="w-4 h-4 text-emerald-600" />
+                            <span className="text-[10px] font-bold leading-none mt-0.5">{cropType.slice(0, 3).toUpperCase()}</span>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-sm text-slate-900">
+                                {p.certificateNumber || 'Procurement Receipt'}
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                Weighed
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
+                              <span>Farmer: <strong className="text-slate-800">{p.farmerId?.name || 'Kisan'}</strong></span>
+                              <span>•</span>
+                              <span>Mobile: <strong className="text-slate-800">{p.farmerId?.phone || 'N/A'}</strong></span>
+                              {pDate && (
+                                <>
+                                  <span>•</span>
+                                  <span>{pDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} at {pDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </>
+                              )}
+                              {totalKg > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span className="font-bold text-emerald-800">
+                                    ⚖️ {totalKg.toLocaleString('en-IN')} kg ({(totalKg / 100).toFixed(2)} Qtl)
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Payment Status & Amount */}
+                        <div className="sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100 flex sm:flex-col items-center sm:items-end justify-between">
+                          {isPaid ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Paid via DBT
+                            </span>
+                          ) : isProcessing ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full">
+                              <Clock className="w-3 h-3 text-blue-600" />
+                              Processing
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 bg-amber-100 text-amber-800 rounded-full">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              Pending
+                            </span>
+                          )}
+
+                          {p.payment?.amount != null && p.payment.amount > 0 && (
+                            <p className="text-sm font-extrabold text-slate-900 font-mono mt-1">
+                              ₹{Number(p.payment.amount).toLocaleString('en-IN')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                )
+              ) : (
+                // Past Appointments List
+                filteredStaffPastBookings.length === 0 ? (
+                  <div className="text-center py-12 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-xl text-slate-400 mb-2">
+                      📅
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-800">No Past Appointments in Archive</h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      {staffHistorySearch
+                        ? `No archived bookings match "${staffHistorySearch}".`
+                        : 'Appointments from prior calendar dates are automatically archived here to keep the active Gate Check-In desk focused on today and upcoming schedules.'}
+                    </p>
+                  </div>
+                ) : (
+                  filteredStaffPastBookings.map((b) => {
+                    const bDate = b.slotId?.startTime ? new Date(b.slotId.startTime) : null
+                    return (
+                      <div
+                        key={b._id}
+                        className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-slate-800 shrink-0 font-mono">
+                            <Ticket className="w-4 h-4 text-slate-600" />
+                            <span className="text-[10px] font-bold leading-none mt-0.5">{b.tokenNumber}</span>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-sm text-slate-900">
+                                {b.farmerId?.name || 'Kisan User'}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                b.status === 'completed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : b.status === 'cancelled'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {b.status?.replace('_', ' ')}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1">
+                              <span>Mobile: <strong className="text-slate-800">{b.farmerId?.phone || 'N/A'}</strong></span>
+                              <span>•</span>
+                              <span>Crop: <strong className="text-slate-800">{b.slotId?.cropType || 'Crop'}</strong></span>
+                              {bDate && (
+                                <>
+                                  <span>•</span>
+                                  <span>Scheduled: {bDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} at {bDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="sm:text-right text-xs text-slate-500">
+                          <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg font-mono">
+                            Archived Slot
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })
+                )
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
+              <span>{selectedCenter?.name} • Historical Records Archive</span>
+              <button
+                type="button"
+                onClick={() => setIsStaffHistoryModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold transition cursor-pointer"
+              >
+                Close Archive
+              </button>
+            </div>
           </div>
         </div>
       )}

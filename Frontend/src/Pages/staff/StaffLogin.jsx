@@ -196,7 +196,7 @@ export default function StaffLogin() {
                     <form onSubmit={handleLoginSubmit} className="p-6 space-y-4">
                         <div>
                             <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                                Username (उपयोगकर्ता नाम) <span className="text-red-500">*</span>
+                                Username <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -216,7 +216,7 @@ export default function StaffLogin() {
 
                         <div>
                             <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                                Password (पासवर्ड) <span className="text-red-500">*</span>
+                                Password <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -253,7 +253,7 @@ export default function StaffLogin() {
                                         <span>Signing in...</span>
                                     </>
                                 ) : (
-                                    <span>Sign In as Staff (लॉगिन करें)</span>
+                                    <span>Sign In as Staff</span>
                                 )}
                             </button>
                         </div>

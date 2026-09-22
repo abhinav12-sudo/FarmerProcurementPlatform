@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/client.js'
 import {
@@ -15,10 +15,29 @@ import {
   ShieldCheck,
   MessageSquare,
   RefreshCw,
+  Globe,
+  ChevronDown,
+  Check,
 } from 'lucide-react'
+import { useLanguage, LANGUAGES } from '../../context/LanguageContext.jsx'
 
 export default function FarmerLogin() {
   const navigate = useNavigate()
+  const { language, setLanguage, t } = useLanguage()
+  const [isLangOpen, setIsLangOpen] = useState(false)
+  const langDropdownRef = useRef(null)
+
+  const currentLangObj = LANGUAGES.find((l) => l.code === language) || LANGUAGES[0]
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (langDropdownRef.current && !langDropdownRef.current.contains(event.target)) {
+        setIsLangOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Tab mode: 'login' (OTP) | 'register'
   const [isRegister, setIsRegister] = useState(false)
@@ -63,7 +82,7 @@ export default function FarmerLogin() {
 
     const cleanPhone = loginPhone.trim()
     if (!cleanPhone || cleanPhone.length < 10) {
-      setError('Please enter a valid 10-digit mobile number.')
+      setError(t('validPhoneError'))
       return
     }
 
@@ -79,11 +98,11 @@ export default function FarmerLogin() {
       }
 
       setOtpStep('otp')
-      setSuccess(`OTP sent to +91 ${cleanPhone}. Please enter the 6-digit code.`)
+      setSuccess(t('otpSentSuccess', { phone: cleanPhone }))
     } catch (err) {
       const errorMsg = err.response?.data?.message || 'Failed to send OTP.'
       if (err.response?.status === 404) {
-        setError('No farmer found with this phone number. Please click "Register New Farmer" below.')
+        setError(t('farmerNotFoundError'))
       } else {
         setError(errorMsg)
       }
@@ -101,7 +120,7 @@ export default function FarmerLogin() {
     setSuccess('')
 
     if (!otpValue.trim() || otpValue.trim().length !== 6) {
-      setError('Please enter the 6-digit OTP code.')
+      setError(t('validOtpError'))
       return
     }
 
@@ -121,7 +140,7 @@ export default function FarmerLogin() {
         localStorage.setItem('farmerAccessToken', data.accessToken)
       }
 
-      setSuccess('Signed in successfully! Redirecting to Kisan Dashboard...')
+      setSuccess(t('signInSuccess'))
 
       setTimeout(() => {
         navigate('/farmer/home')
@@ -143,7 +162,7 @@ export default function FarmerLogin() {
     setSuccess('')
 
     if (!registerData.name.trim() || !registerData.phone.trim()) {
-      setError('Please provide both your Name and Mobile Number.')
+      setError(t('registerRequiredFields'))
       return
     }
 
@@ -154,7 +173,7 @@ export default function FarmerLogin() {
       const farmer = response.data?.data
 
       localStorage.setItem('farmer', JSON.stringify(farmer))
-      setSuccess('Farmer registered successfully! Redirecting to your dashboard...')
+      setSuccess(t('registeredSuccess'))
 
       setTimeout(() => {
         navigate('/farmer/home')
@@ -162,7 +181,7 @@ export default function FarmerLogin() {
     } catch (err) {
       const errorMsg = err.response?.data?.message || 'Registration failed.'
       if (err.response?.status === 409) {
-        setError('This phone number is already registered. Please switch to "Farmer Sign In" above.')
+        setError(t('alreadyRegisteredPhone'))
       } else {
         setError(errorMsg)
       }
@@ -174,16 +193,65 @@ export default function FarmerLogin() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-emerald-50 to-emerald-100 flex flex-col justify-center items-center p-4 sm:p-6">
       {/* Header & Back button */}
-      <div className="w-full max-w-md mb-4 flex items-center justify-between">
+      <div className="w-full max-w-md mb-4 flex items-center justify-between gap-2">
         <button
           onClick={() => navigate('/')}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-800 hover:text-emerald-950 transition cursor-pointer"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-800 hover:text-emerald-950 transition cursor-pointer shrink-0"
         >
-          <ArrowLeft className="w-4 h-4" /> Back to Home
+          <ArrowLeft className="w-4 h-4" /> {t('backToHome')}
         </button>
-        <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-200 text-emerald-900 rounded-full flex items-center gap-1">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-800" /> Kisan Portal
-        </span>
+
+        <div className="flex items-center gap-2">
+          {/* Language Selector Dropdown */}
+          <div className="relative" ref={langDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsLangOpen(!isLangOpen)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-900 transition cursor-pointer shadow-2xs"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{currentLangObj.flag}</span>
+              <span className="font-medium text-xs hidden xs:inline">{currentLangObj.nativeLabel}</span>
+              <ChevronDown className={`w-3 h-3 text-emerald-700 transition-transform ${isLangOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isLangOpen && (
+              <div className="absolute right-0 mt-2 w-40 bg-white rounded-2xl shadow-xl border border-emerald-100 py-1.5 z-50 animate-in fade-in zoom-in-95">
+                <div className="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-gray-400 border-b border-gray-100 mb-1">
+                  {t('selectLanguage')}
+                </div>
+                {LANGUAGES.map((langItem) => {
+                  const isSelected = langItem.code === language
+                  return (
+                    <button
+                      key={langItem.code}
+                      type="button"
+                      onClick={() => {
+                        setLanguage(langItem.code)
+                        setIsLangOpen(false)
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-50 text-emerald-900 font-bold'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-base leading-none">{langItem.flag}</span>
+                        <span>{langItem.nativeLabel}</span>
+                      </div>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-200 text-emerald-900 rounded-full flex items-center gap-1 shrink-0">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-800" /> {t('kisanPortal')}
+          </span>
+        </div>
       </div>
 
       {/* Main Card */}
@@ -191,12 +259,10 @@ export default function FarmerLogin() {
         {/* Banner */}
         <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 px-6 py-5 text-white">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-            {isRegister ? 'Farmer Registration' : 'Kisan Sign In (लॉगिन)'}
+            {isRegister ? t('farmerRegisterTitle') : t('farmerSignInTitle')}
           </h2>
           <p className="text-emerald-100 text-xs sm:text-sm mt-1">
-            {isRegister
-              ? 'Register once to book mandi slots and receive MSP payments'
-              : 'Sign in with your registered phone number via secure OTP'}
+            {isRegister ? t('farmerRegisterSubtitle') : t('farmerSignInSubtitle')}
           </p>
         </div>
 
@@ -214,7 +280,7 @@ export default function FarmerLogin() {
               !isRegister ? 'bg-white text-emerald-900 shadow-sm' : 'hover:text-gray-900'
             }`}
           >
-            Farmer Sign In (OTP)
+            {t('tabSignIn')}
           </button>
           <button
             type="button"
@@ -227,7 +293,7 @@ export default function FarmerLogin() {
               isRegister ? 'bg-white text-emerald-900 shadow-sm' : 'hover:text-gray-900'
             }`}
           >
-            Register New Farmer
+            {t('tabRegister')}
           </button>
         </div>
 
@@ -254,7 +320,7 @@ export default function FarmerLogin() {
               <MessageSquare className="w-4 h-4 text-emerald-400 shrink-0" />
               <div>
                 <span className="text-[10px] text-emerald-400 font-bold block uppercase">
-                  Simulated SMS Code
+                  {t('simulatedSmsCode')}
                 </span>
                 <span className="font-mono font-bold text-white tracking-widest text-sm">
                   {simulatedOtp}
@@ -262,7 +328,7 @@ export default function FarmerLogin() {
               </div>
             </div>
             <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-1 rounded">
-              Auto-filled
+              {t('autoFilled')}
             </span>
           </div>
         )}
@@ -276,7 +342,7 @@ export default function FarmerLogin() {
               <form onSubmit={handleRequestOtp} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                    Mobile Number (मोबाइल नंबर) <span className="text-red-500">*</span>
+                    {t('mobileNumberLabel')} <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -289,14 +355,14 @@ export default function FarmerLogin() {
                         setLoginPhone(e.target.value)
                         if (error) setError('')
                       }}
-                      placeholder="e.g. 9876543210"
+                      placeholder={t('mobileNumberPlaceholder')}
                       maxLength={10}
                       required
                       className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition"
                     />
                   </div>
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Enter the 10-digit mobile number linked with your PM-Kisan / Mandi account.
+                    {t('mobileNumberHelp')}
                   </p>
                 </div>
 
@@ -309,12 +375,12 @@ export default function FarmerLogin() {
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Sending OTP...</span>
+                        <span>{t('sendingOtp')}</span>
                       </>
                     ) : (
                       <>
                         <KeyRound className="w-4 h-4" />
-                        <span>Send Login OTP (ओटीपी भेजें)</span>
+                        <span>{t('sendLoginOtp')}</span>
                       </>
                     )}
                   </button>
@@ -325,7 +391,7 @@ export default function FarmerLogin() {
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      Enter 6-Digit OTP (ओटीपी दर्ज करें) <span className="text-red-500">*</span>
+                      {t('enterOtpLabel')} <span className="text-red-500">*</span>
                     </label>
                     <button
                       type="button"
@@ -336,7 +402,7 @@ export default function FarmerLogin() {
                       }}
                       className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold cursor-pointer"
                     >
-                      Change Number
+                      {t('changeNumber')}
                     </button>
                   </div>
 
@@ -368,10 +434,10 @@ export default function FarmerLogin() {
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Verifying...</span>
+                        <span>{t('verifying')}</span>
                       </>
                     ) : (
-                      <span>Verify & Sign In (लॉगिन करें)</span>
+                      <span>{t('verifyAndSignIn')}</span>
                     )}
                   </button>
 
@@ -382,7 +448,7 @@ export default function FarmerLogin() {
                     className="w-full flex items-center justify-center gap-1.5 text-xs text-gray-600 hover:text-emerald-800 py-1 font-medium transition cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Didn't receive OTP? Resend OTP</span>
+                    <span>{t('resendOtp')}</span>
                   </button>
                 </div>
               </form>
@@ -395,7 +461,7 @@ export default function FarmerLogin() {
           <form onSubmit={handleRegisterSubmit} className="p-6 space-y-3.5">
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                Full Name (पूरा नाम) <span className="text-red-500">*</span>
+                {t('fullNameLabel')} <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -406,7 +472,7 @@ export default function FarmerLogin() {
                   name="name"
                   value={registerData.name}
                   onChange={handleRegisterChange}
-                  placeholder="e.g. Ramesh Kumar"
+                  placeholder={t('fullNamePlaceholder')}
                   required
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 />
@@ -415,7 +481,7 @@ export default function FarmerLogin() {
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                Mobile Number (मोबाइल नंबर) <span className="text-red-500">*</span>
+                {t('mobileNumberLabel')} <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -426,7 +492,7 @@ export default function FarmerLogin() {
                   name="phone"
                   value={registerData.phone}
                   onChange={handleRegisterChange}
-                  placeholder="e.g. 9876543210"
+                  placeholder={t('mobileNumberPlaceholder')}
                   maxLength={10}
                   required
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 transition"
@@ -436,7 +502,7 @@ export default function FarmerLogin() {
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                Village / District (गाँव / ज़िला)
+                {t('villageDistrictLabel')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -447,7 +513,7 @@ export default function FarmerLogin() {
                   name="village"
                   value={registerData.village}
                   onChange={handleRegisterChange}
-                  placeholder="e.g. Rampur, Anantnag"
+                  placeholder={t('villageDistrictPlaceholder')}
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 />
               </div>
@@ -455,7 +521,7 @@ export default function FarmerLogin() {
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                Land Record / Khasra (खसरा / भूमि रिकॉर्ड)
+                {t('landRecordLabel')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -466,7 +532,7 @@ export default function FarmerLogin() {
                   name="land_record_number"
                   value={registerData.land_record_number}
                   onChange={handleRegisterChange}
-                  placeholder="e.g. KH-45892/2024"
+                  placeholder={t('landRecordPlaceholder')}
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 />
               </div>
@@ -474,7 +540,7 @@ export default function FarmerLogin() {
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                Bank Account for DBT (बैंक खाता संख्या)
+                {t('bankAccountLabel')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -485,7 +551,7 @@ export default function FarmerLogin() {
                   name="bank_account"
                   value={registerData.bank_account}
                   onChange={handleRegisterChange}
-                  placeholder="e.g. 123456789012"
+                  placeholder={t('bankAccountPlaceholder')}
                   className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 />
               </div>
@@ -500,10 +566,10 @@ export default function FarmerLogin() {
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Registering...</span>
+                    <span>{t('registering')}</span>
                   </>
                 ) : (
-                  <span>Register & Continue (पंजीकरण करें)</span>
+                  <span>{t('registerAndContinue')}</span>
                 )}
               </button>
             </div>
@@ -512,7 +578,7 @@ export default function FarmerLogin() {
       </div>
 
       <p className="text-center text-xs text-emerald-800/80 mt-6">
-        Ministry of Consumer Affairs, Food & Public Distribution • Direct Farmer MSP Portal
+        {t('loginGovFooter')}
       </p>
     </div>
   )

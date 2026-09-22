@@ -56,7 +56,7 @@ export default function Landing() {
             </div>
 
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">
-              Farmer Portal (किसान सेवा)
+              Farmer Portal
             </h2>
             <p className="text-xs sm:text-sm text-gray-500 mb-5">
               Book scheduled arrival slots, receive electronic queue tokens, and track DBT payment credits.
@@ -82,7 +82,7 @@ export default function Landing() {
             type="button"
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 group-hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition text-sm cursor-pointer"
           >
-            <span>Continue as Farmer (किसान प्रवेश)</span>
+            <span>Continue as Farmer</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </div>
@@ -103,7 +103,7 @@ export default function Landing() {
             </div>
 
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">
-              Staff & Officer Desk (अधिकारी पोर्टल)
+              Staff & Officer Desk
             </h2>
             <p className="text-xs sm:text-sm text-gray-500 mb-5">
               Manage gate check-ins, record produce weights and quality grades, and disburse MSP payments.
@@ -129,7 +129,7 @@ export default function Landing() {
             type="button"
             className="w-full flex items-center justify-center gap-2 bg-slate-900 group-hover:bg-slate-800 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition text-sm cursor-pointer"
           >
-            <span>Officer Sign In (अधिकारी लॉगिन)</span>
+            <span>Officer Sign In</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </div>

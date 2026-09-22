@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import api from '../api/client.js'
 import { Ticket, Calendar, Clock, MapPin, IndianRupee, CheckCircle2, AlertCircle, Loader2, XCircle, RefreshCw } from 'lucide-react'
+import { useLanguage } from '../context/LanguageContext.jsx'
 
 export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange }) {
+  const { t, getCropName } = useLanguage()
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -29,7 +31,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
   }, [farmer?._id, refreshTrigger])
 
   const handleCancelBooking = async (bookingId) => {
-    if (!window.confirm('Are you sure you want to cancel this booking? The slot will be released back to other farmers.')) {
+    if (!window.confirm(t('confirmCancelBooking'))) {
       return
     }
 
@@ -50,25 +52,25 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
       case 'booked':
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full">
-            <Clock className="w-3 h-3" /> Booked (आगमन प्रतीक्षित)
+            <Clock className="w-3 h-3" /> {t('statusBooked')}
           </span>
         )
       case 'checked_in':
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full">
-            <CheckCircle2 className="w-3 h-3" /> In Mandi Queue (गेट पर उपस्थित)
+            <CheckCircle2 className="w-3 h-3" /> {t('statusCheckedIn')}
           </span>
         )
       case 'completed':
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full">
-            <CheckCircle2 className="w-3 h-3" /> Procured (तौल पूर्ण)
+            <CheckCircle2 className="w-3 h-3" /> {t('statusCompleted')}
           </span>
         )
       case 'cancelled':
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 bg-red-100 text-red-800 rounded-full">
-            <XCircle className="w-3 h-3" /> Cancelled (रद्द)
+            <XCircle className="w-3 h-3" /> {t('statusCancelled')}
           </span>
         )
       default:
@@ -84,7 +86,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
     if (!paymentStatus && amount == null) {
       return (
         <span className="text-xs text-gray-400 italic">
-          Awaiting weighing
+          {t('paymentAwaitingWeighing')}
         </span>
       )
     }
@@ -94,7 +96,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
         return (
           <div className="text-right">
             <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-              Paid via DBT (भुगतान सफल)
+              {t('paymentPaidViaDbt')}
             </span>
             <p className="text-sm font-extrabold text-gray-900 mt-1 flex items-center justify-end">
               <IndianRupee className="w-3.5 h-3.5" />
@@ -106,7 +108,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
         return (
           <div className="text-right">
             <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-              Processing (प्रक्रियाधीन)
+              {t('paymentProcessing')}
             </span>
             <p className="text-sm font-extrabold text-gray-900 mt-1 flex items-center justify-end">
               <IndianRupee className="w-3.5 h-3.5" />
@@ -119,7 +121,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
         return (
           <div className="text-right">
             <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-              Payment Pending (लंबित)
+              {t('paymentPending')}
             </span>
             <p className="text-sm font-extrabold text-gray-900 mt-1 flex items-center justify-end">
               <IndianRupee className="w-3.5 h-3.5" />
@@ -137,17 +139,17 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
         <div>
           <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
             <Ticket className="w-5 h-5 text-emerald-600" />
-            <span>My Tokens & Mandi Passbook (मेरी पर्चियां)</span>
+            <span>{t('myTokensPassbook')}</span>
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            View active arrival passes, counter progress, and DBT payment transfer status
+            {t('historySubtitle')}
           </p>
         </div>
         <button
           onClick={fetchHistory}
           disabled={loading}
           className="p-2 text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition cursor-pointer"
-          title="Refresh History"
+          title={t('refreshHistory')}
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -157,7 +159,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
         {loading ? (
           <div className="py-12 flex flex-col items-center justify-center text-gray-500">
             <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mb-2" />
-            <p className="text-xs">Loading your digital passbook...</p>
+            <p className="text-xs">{t('loadingPassbook')}</p>
           </div>
         ) : error ? (
           <div className="text-center py-6 text-xs text-red-600 bg-red-50 rounded-2xl border border-red-100">
@@ -168,9 +170,9 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
             <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto text-xl text-gray-400 mb-2">
               📜
             </div>
-            <p className="text-sm font-semibold text-gray-700">No booking history yet</p>
+            <p className="text-sm font-semibold text-gray-700">{t('noHistoryYet')}</p>
             <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-              You haven't booked any mandi slots yet. Use the booking section above to reserve your first arrival window.
+              {t('noHistoryDesc')}
             </p>
           </div>
         ) : (
@@ -204,7 +206,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-base font-extrabold text-gray-900 tracking-tight">
-                          Token: {item.tokenNumber}
+                          {t('tokenLabel')}: {item.tokenNumber}
                         </span>
                         {getStatusBadge(item.status)}
                       </div>
@@ -212,14 +214,14 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
                       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
                         <span className="flex items-center gap-1">
                           <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                          <strong>{item.centerName || 'Mandi Center'}</strong>
+                          <strong>{item.centerName || t('mandiCenterDefault')}</strong>
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                          {dateFormatted} at {timeFormatted}
+                          {dateFormatted} {t('atTime')} {timeFormatted}
                         </span>
                         <span>
-                          Crop: <strong>{item.cropType}</strong>
+                          {t('cropLabel')}: <strong>{getCropName(item.cropType)}</strong>
                         </span>
                       </div>
                     </div>
@@ -238,7 +240,7 @@ export default function FarmerHistory({ farmer, refreshTrigger, onHistoryChange 
                         onClick={() => handleCancelBooking(item._id)}
                         className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2.5 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0 border border-red-200 disabled:opacity-50"
                       >
-                        {cancellingId === item._id ? 'Cancelling...' : 'Cancel Slot'}
+                        {cancellingId === item._id ? t('cancelling') : t('cancelSlot')}
                       </button>
                     )}
                   </div>

@@ -1,25 +1,30 @@
 import { useState, useEffect } from 'react'
 import api from '../api/client.js'
 import { Building2, Calendar, Clock, CheckCircle, AlertCircle, Loader2, Users, Sparkles, Tag } from 'lucide-react'
-
-const COMMON_CROPS = [
-  { name: 'Wheat', hindi: 'गेहूं', icon: '🌾' },
-  { name: 'Paddy', hindi: 'धान', icon: '🌾' },
-  { name: 'Mustard', hindi: 'सरसों', icon: '🌼' },
-  { name: 'Maize', hindi: 'मक्का', icon: '🌽' },
-  { name: 'Gram', hindi: 'चना', icon: '🌱' },
-  { name: 'Soybean', hindi: 'सोयाबीन', icon: '🫘' },
-]
+import { useLanguage } from '../context/LanguageContext.jsx'
 
 export default function SlotBooking({ farmer, onBookingSuccess }) {
+  const { t, getCropName, crops } = useLanguage()
   const [centers, setCenters] = useState([])
   const [loadingCenters, setLoadingCenters] = useState(true)
+
+  const getLocalDateString = (d = new Date()) => {
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
 
   const [selectedCenter, setSelectedCenter] = useState('')
   const [selectedCrop, setSelectedCrop] = useState('Wheat')
   const [selectedDate, setSelectedDate] = useState(() => {
-    const today = new Date()
-    return today.toISOString().split('T')[0]
+    const now = new Date()
+    if (now.getHours() >= 17) {
+      const tomorrow = new Date(now)
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      return getLocalDateString(tomorrow)
+    }
+    return getLocalDateString(now)
   })
 
   const [slots, setSlots] = useState([])
@@ -86,7 +91,7 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
         tokenNumber: booking.tokenNumber,
         cropType: slot.cropType,
         startTime: slot.startTime,
-        centerName: centers.find((c) => c._id === selectedCenter)?.name || 'Mandi Center',
+        centerName: centers.find((c) => c._id === selectedCenter)?.name || t('mandiCenterDefault'),
       })
 
       // Refresh slot list to update remaining seats
@@ -118,11 +123,11 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
       {/* Card Header */}
       <div className="bg-gradient-to-r from-emerald-700 to-teal-800 px-6 py-5 text-white">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-200">
-          <Sparkles className="w-4 h-4" /> Smart Slot Allocation
+          <Sparkles className="w-4 h-4" /> {t('smartSlotAllocation')}
         </div>
-        <h2 className="text-xl sm:text-2xl font-bold mt-1">Book Mandi Arrival Slot</h2>
+        <h2 className="text-xl sm:text-2xl font-bold mt-1">{t('bookMandiArrivalSlot')}</h2>
         <p className="text-xs sm:text-sm text-emerald-100 mt-1">
-          Reserve an arrival window to eliminate waiting line delays and receive your digital queue token
+          {t('slotBookingSubtitle')}
         </p>
       </div>
 
@@ -134,16 +139,16 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
               <CheckCircle className="w-8 h-8 text-emerald-600 shrink-0 mt-1" />
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  Slot Confirmed!
+                  {t('slotConfirmed')}
                 </span>
                 <h3 className="text-lg font-bold text-gray-900 mt-1">
-                  Your Token: <span className="text-emerald-700 text-xl font-extrabold">{bookingSuccessData.tokenNumber}</span>
+                  {t('yourToken')} <span className="text-emerald-700 text-xl font-extrabold">{bookingSuccessData.tokenNumber}</span>
                 </h3>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  {bookingSuccessData.cropType} • {formatSlotTime(bookingSuccessData.startTime)} at {bookingSuccessData.centerName}
+                  {getCropName(bookingSuccessData.cropType)} • {formatSlotTime(bookingSuccessData.startTime)} at {bookingSuccessData.centerName}
                 </p>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  📲 SMS confirmation has been simulated. Show this token at the mandi counter on arrival.
+                  📲 {t('smsSimulatedHint')}
                 </p>
               </div>
             </div>
@@ -151,7 +156,7 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
               onClick={() => setBookingSuccessData(null)}
               className="px-4 py-2 bg-emerald-600 text-white text-xs font-semibold rounded-xl hover:bg-emerald-700 transition cursor-pointer shrink-0 shadow-sm"
             >
-              Book Another Slot
+              {t('bookAnotherSlot')}
             </button>
           </div>
         )}
@@ -170,14 +175,14 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Mandi Center (उपार्जन केंद्र)</span>
+              <span>{t('mandiCenterLabel')}</span>
             </label>
             {loadingCenters ? (
               <div className="flex items-center gap-2 text-xs text-gray-500 py-2.5">
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> Loading centers...
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> {t('loadingCenters')}
               </div>
             ) : centers.length === 0 ? (
-              <div className="text-xs text-red-600 py-2">No centers configured in backend yet.</div>
+              <div className="text-xs text-red-600 py-2">{t('noCentersConfigured')}</div>
             ) : (
               <select
                 value={selectedCenter}
@@ -197,16 +202,16 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Tag className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Produce Crop (फसल)</span>
+              <span>{t('produceCropLabel')}</span>
             </label>
             <select
               value={selectedCrop}
               onChange={(e) => setSelectedCrop(e.target.value)}
               className="w-full py-2.5 px-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition cursor-pointer"
             >
-              {COMMON_CROPS.map((crop) => (
-                <option key={crop.name} value={crop.name}>
-                  {crop.icon} {crop.name} ({crop.hindi})
+              {crops.map((crop) => (
+                <option key={crop.key} value={crop.key}>
+                  {crop.icon} {getCropName(crop.key)}
                 </option>
               ))}
             </select>
@@ -216,12 +221,12 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Arrival Date (तारीख)</span>
+              <span>{t('arrivalDateLabel')}</span>
             </label>
             <input
               type="date"
               value={selectedDate}
-              min={new Date().toISOString().split('T')[0]}
+              min={getLocalDateString(new Date())}
               onChange={(e) => setSelectedDate(e.target.value)}
               className="w-full py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition cursor-pointer"
             />
@@ -233,10 +238,10 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
               <Clock className="w-4 h-4 text-emerald-600" />
-              <span>Available Arrival Slots for {selectedCrop}</span>
+              <span>{t('availableSlotsForCrop', { crop: getCropName(selectedCrop) })}</span>
             </h3>
             <span className="text-xs text-gray-500">
-              {slots.length} {slots.length === 1 ? 'slot' : 'slots'} available
+              {t('slotsAvailableCount', { count: slots.length, label: slots.length === 1 ? t('slotSingular') : t('slotPlural') })}
             </span>
           </div>
 
@@ -246,9 +251,9 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="font-bold text-sm">⛔ Today's Mandi Intake at Full Capacity</h4>
+                  <h4 className="font-bold text-sm">⛔ {t('intakeCapacityFullTitle')}</h4>
                   <p className="text-xs text-amber-800 mt-0.5">
-                    Queue for today already extends past the 5:00 PM gate closing. Any further bookings for today cannot be accommodated.
+                    {t('intakeCapacityFullDesc')}
                   </p>
                 </div>
               </div>
@@ -257,11 +262,11 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
                 onClick={() => {
                   const tomorrow = new Date()
                   tomorrow.setDate(tomorrow.getDate() + 1)
-                  setSelectedDate(tomorrow.toISOString().split('T')[0])
+                  setSelectedDate(getLocalDateString(tomorrow))
                 }}
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 transition cursor-pointer shadow-xs"
               >
-                Switch to Tomorrow (कल के लिए बुक करें)
+                {t('switchToTomorrow')}
               </button>
             </div>
           )}
@@ -269,7 +274,7 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
           {loadingSlots ? (
             <div className="py-12 flex flex-col items-center justify-center text-gray-500">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-600 mb-2" />
-              <p className="text-xs">Checking real-time slot availability...</p>
+              <p className="text-xs">{t('checkingSlotAvailability')}</p>
             </div>
           ) : slotError ? (
             <div className="text-center py-8 text-xs text-red-600 bg-red-50 rounded-2xl border border-red-100">
@@ -280,9 +285,9 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
               <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto text-xl text-gray-400 mb-2">
                 ⏳
               </div>
-              <p className="text-sm font-semibold text-gray-700">No open slots found for this date & crop</p>
+              <p className="text-sm font-semibold text-gray-700">{t('noOpenSlotsFound')}</p>
               <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-                The center administration may not have scheduled procurement hours for this combination yet. Try selecting another date or crop.
+                {t('noOpenSlotsDesc')}
               </p>
             </div>
           ) : (
@@ -319,16 +324,16 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
                           }`}
                         >
                           {isCapacityExceeded
-                            ? 'Intake Closed (5 PM Cutoff)'
+                            ? t('intakeClosedCutoff')
                             : isFull
-                            ? 'Full'
-                            : `${slot.seatsLeft} seats left`}
+                            ? t('slotFullBadge')
+                            : t('seatsLeftBadge', { count: slot.seatsLeft })}
                         </span>
                       </div>
 
                       <div className="mt-2 text-xs text-gray-500 flex items-center gap-2">
                         <Users className="w-3.5 h-3.5 text-gray-400" />
-                        <span>Capacity: {slot.bookedCount} / {slot.capacity} farmers booked</span>
+                        <span>{t('capacityBookedText', { booked: slot.bookedCount, capacity: slot.capacity })}</span>
                       </div>
                     </div>
 
@@ -345,14 +350,14 @@ export default function SlotBooking({ farmer, onBookingSuccess }) {
                       {isBookingThis ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Reserving Seat...</span>
+                          <span>{t('reservingSeat')}</span>
                         </>
                       ) : isCapacityExceeded ? (
-                        <span>Intake Full (Cutoff 5:00 PM)</span>
+                        <span>{t('intakeFullBtn')}</span>
                       ) : isFull ? (
-                        <span>Slot Full</span>
+                        <span>{t('slotFullBtn')}</span>
                       ) : (
-                        <span>Book This Slot (बुक करें)</span>
+                        <span>{t('bookThisSlotBtn')}</span>
                       )}
                     </button>
                   </div>

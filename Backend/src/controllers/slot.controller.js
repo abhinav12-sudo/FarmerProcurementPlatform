@@ -16,6 +16,10 @@ const getSlots = asyncHandler(async (req, res) => {
         const end = new Date(date);
         end.setDate(end.getDate() + 1);
         filter.startTime = { $gte: start, $lt: end };
+    } else {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        filter.startTime = { $gte: startOfToday };
     }
 
     const slots = await Slot.find(filter).sort({ startTime: 1 });
@@ -29,8 +33,20 @@ const getSlots = asyncHandler(async (req, res) => {
         if (now.getHours() >= 17) {
             isTodayCapacityFull = true;
         } else {
+            const startOfToday = new Date(now);
+            startOfToday.setHours(0, 0, 0, 0);
+            const endOfToday = new Date(now);
+            endOfToday.setHours(23, 59, 59, 999);
+
+            const todaySlots = await Slot.find({
+                centerId: center_id,
+                startTime: { $gte: startOfToday, $lte: endOfToday },
+            }).select("_id");
+            const todaySlotIds = todaySlots.map((s) => s._id);
+
             const activeCount = await Booking.countDocuments({
                 centerId: center_id,
+                slotId: { $in: todaySlotIds },
                 status: { $in: ["booked", "checked_in"] },
             });
 
@@ -72,7 +88,7 @@ const getSlots = asyncHandler(async (req, res) => {
 // Staff / Admin — view all slots for a center with full capacity breakdown
 const getCenterSlots = asyncHandler(async (req, res) => {
     const { center_id } = req.params;
-    const { date } = req.query;
+    const { date, include_past } = req.query;
 
     const filter = { centerId: center_id };
     if (date) {
@@ -80,6 +96,10 @@ const getCenterSlots = asyncHandler(async (req, res) => {
         const end = new Date(date);
         end.setDate(end.getDate() + 1);
         filter.startTime = { $gte: start, $lt: end };
+    } else if (include_past !== 'true') {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        filter.startTime = { $gte: startOfToday };
     }
 
     const slots = await Slot.find(filter).sort({ startTime: 1 });

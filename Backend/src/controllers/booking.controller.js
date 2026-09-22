@@ -42,8 +42,20 @@ const createBooking = asyncHandler(async (req, res) => {
         }
 
         // Check active queue count for today at this center
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(now);
+        endOfToday.setHours(23, 59, 59, 999);
+
+        const todaySlots = await Slot.find({
+            centerId: slot.centerId,
+            startTime: { $gte: startOfToday, $lte: endOfToday },
+        }).select("_id");
+        const todaySlotIds = todaySlots.map((s) => s._id);
+
         const activeCount = await Booking.countDocuments({
             centerId: slot.centerId,
+            slotId: { $in: todaySlotIds },
             status: { $in: ["booked", "checked_in"] },
         });
 
@@ -129,27 +141,44 @@ const cancelBooking = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, booking, "Booking cancelled"));
 });
 
-// Helper to expire any 'booked' bookings whose scheduled gate time has passed (past dates or today after 5:00 PM)
+// Helper to expire any 'booked' bookings whose scheduled slot gate time has passed (past dates or today after 5:00 PM)
 const expireMissedBookings = async (centerId) => {
     try {
         const now = new Date();
         const startOfToday = new Date(now);
         startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date(now);
+        endOfToday.setHours(23, 59, 59, 999);
 
         const currentHour = now.getHours();
         const isPast5pmToday = currentHour >= 17;
 
-        // Expire un-checked-in bookings from past days, OR today's bookings if current time >= 17:00
-        const expireFilter = {
+        // Find slots belonging to this center that are either:
+        // 1. From past days (startTime < startOfToday)
+        // 2. Scheduled for today, if current time is past 5:00 PM (17:00)
+        // Bookings for tomorrow or future dates (startTime > endOfToday) are NEVER expired here.
+        const expiredSlotsQuery = {
             centerId,
-            status: "booked",
             $or: [
-                { createdAt: { $lt: startOfToday } },
-                ...(isPast5pmToday ? [{ createdAt: { $gte: startOfToday } }] : []),
+                { startTime: { $lt: startOfToday } },
+                ...(isPast5pmToday ? [{ startTime: { $gte: startOfToday, $lte: endOfToday } }] : []),
             ],
         };
 
-        const expiredBookings = await Booking.find(expireFilter);
+        const expiredSlots = await Slot.find(expiredSlotsQuery).select("_id");
+        if (!expiredSlots || expiredSlots.length === 0) {
+            return;
+        }
+
+        const expiredSlotIds = expiredSlots.map((s) => s._id);
+
+        // Expire only un-checked-in bookings for these specific expired slots
+        const expiredBookings = await Booking.find({
+            centerId,
+            status: "booked",
+            slotId: { $in: expiredSlotIds },
+        });
+
         if (expiredBookings.length > 0) {
             const expiredIds = expiredBookings.map((b) => b._id);
             await Booking.updateMany(
@@ -157,10 +186,13 @@ const expireMissedBookings = async (centerId) => {
                 { status: "cancelled" }
             );
 
-            // Decrement slot bookedCount for expired bookings
+            // Release seat count back to slot
             for (const b of expiredBookings) {
                 if (b.slotId) {
-                    await Slot.updateOne({ _id: b.slotId }, { $inc: { bookedCount: -1 } });
+                    await Slot.updateOne(
+                        { _id: b.slotId, bookedCount: { $gt: 0 } },
+                        { $inc: { bookedCount: -1 } }
+                    );
                 }
             }
 
@@ -202,11 +234,24 @@ const getQueue = asyncHandler(async (req, res) => {
         },
     ]);
 
-    // 3. Advance booked tokens for this center awaiting arrival
+    // 3. Advance booked tokens for this center awaiting arrival TODAY
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+
     const bookedQueue = await Booking.aggregate([
         { $match: { centerId: centerObjectId, status: "booked" } },
         { $lookup: { from: "slots", localField: "slotId", foreignField: "_id", as: "slot" } },
         { $unwind: { path: "$slot", preserveNullAndEmptyArrays: true } },
+        {
+            $match: {
+                $or: [
+                    { "slot.startTime": { $gte: startOfToday, $lte: endOfToday } },
+                    { slot: { $exists: false } },
+                ],
+            },
+        },
         { $sort: { createdAt: 1 } },
         {
             $project: {
@@ -292,6 +337,16 @@ const getCenterBookings = asyncHandler(async (req, res) => {
             return slotTime >= start && slotTime <= end;
         });
     }
+
+    // Sort chronologically by appointment slot time (startTime ascending) and token sequence
+    result.sort((a, b) => {
+        const timeA = a.slotId?.startTime ? new Date(a.slotId.startTime).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const timeB = b.slotId?.startTime ? new Date(b.slotId.startTime).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        if (timeA !== timeB) return timeA - timeB; // earlier dates and times first!
+        const seqA = parseInt(a.tokenNumber?.split("-")[1], 10) || 0;
+        const seqB = parseInt(b.tokenNumber?.split("-")[1], 10) || 0;
+        return seqA - seqB;
+    });
 
     return res.status(200).json(new ApiResponse(200, result, "Center bookings fetched"));
 });
